@@ -363,7 +363,7 @@ dpctl_add_if(int argc OVS_UNUSED, const char *argv[],
             goto next_destroy_args;
         }
 
-        error = dpif_port_add(dpif, netdev, &port_no);
+        error = dpif_port_add(dpif, netdev, &port_no, NULL);
         if (error) {
             dpctl_error(dpctl_p, error, "adding %s to %s failed", name,
                         argv[1]);
