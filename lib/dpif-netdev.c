@@ -2236,7 +2236,7 @@ do_add_port(struct dp_netdev *dp, const char *devname, const char *type,
 
 static int
 dpif_netdev_port_add(struct dpif *dpif, struct netdev *netdev,
-                     odp_port_t *port_nop)
+                     odp_port_t *port_nop, struct sset *port_names OVS_UNUSED)
 {
     struct dp_netdev *dp = get_dp_netdev(dpif);
     char namebuf[NETDEV_VPORT_NAME_BUFSIZE];
