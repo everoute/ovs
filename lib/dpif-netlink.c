@@ -858,7 +858,7 @@ exit:
 
 static int
 dpif_netlink_port_add_compat(struct dpif_netlink *dpif, struct netdev *netdev,
-                             odp_port_t *port_nop)
+                             odp_port_t *port_nop, struct sset *port_names)
     OVS_REQ_WRLOCK(dpif->upcall_lock)
 {
     const struct netdev_tunnel_config *tnl_cfg;
@@ -866,8 +866,12 @@ dpif_netlink_port_add_compat(struct dpif_netlink *dpif, struct netdev *netdev,
     const char *type = netdev_get_type(netdev);
     uint64_t options_stub[64 / 8];
     enum ovs_vport_type ovs_type;
-    struct ofpbuf options;
+    struct ofpbuf *options_buf = NULL;
     const char *name;
+
+    uint32_t port_names_len = 0;
+    const char *port_name;
+    char *port_names_buf, *port_names_ptr;
 
     name = netdev_vport_get_dpif_port(netdev, namebuf, sizeof namebuf);
 
@@ -896,31 +900,59 @@ dpif_netlink_port_add_compat(struct dpif_netlink *dpif, struct netdev *netdev,
     }
 #endif
 
+    if (port_names) {
+        SSET_FOR_EACH (port_name, port_names) {
+            port_names_len += strlen(port_name) + 1;
+        }
+        port_names_len++;
+
+        port_names_ptr = port_names_buf = xmalloc(port_names_len);
+        SSET_FOR_EACH (port_name, port_names) {
+            strncpy(port_names_ptr, port_name, strlen(port_name));
+            port_names_ptr += strlen(port_name);
+            *port_names_ptr++ = '#';
+        }
+        *port_names_ptr = '\0';
+
+        VLOG_INFO("%s: add port %s with port_names %s",
+                  dpif_name(&dpif->dpif), name, port_names_buf);
+
+        options_buf = ofpbuf_new(port_names_len + sizeof(options_stub));
+        nl_msg_put_string(options_buf, OVS_VPORT_ATTR_OPTIONS, port_names_buf);
+
+        free(port_names_buf);
+    }
+
     tnl_cfg = netdev_get_tunnel_config(netdev);
     if (tnl_cfg && (tnl_cfg->dst_port != 0 || tnl_cfg->exts)) {
-        ofpbuf_use_stack(&options, options_stub, sizeof options_stub);
+        if (!options_buf) {
+            options_buf = ofpbuf_new(sizeof(options_stub));
+            ofpbuf_use_stack(options_buf, options_stub, sizeof options_stub);
+        }
         if (tnl_cfg->dst_port) {
-            nl_msg_put_u16(&options, OVS_TUNNEL_ATTR_DST_PORT,
+            nl_msg_put_u16(options_buf, OVS_TUNNEL_ATTR_DST_PORT,
                            ntohs(tnl_cfg->dst_port));
         }
         if (tnl_cfg->exts) {
             size_t ext_ofs;
             int i;
 
-            ext_ofs = nl_msg_start_nested(&options, OVS_TUNNEL_ATTR_EXTENSION);
+            ext_ofs = nl_msg_start_nested(options_buf, OVS_TUNNEL_ATTR_EXTENSION);
             for (i = 0; i < 32; i++) {
                 if (tnl_cfg->exts & (1 << i)) {
-                    nl_msg_put_flag(&options, i);
+                    nl_msg_put_flag(options_buf, i);
                 }
             }
-            nl_msg_end_nested(&options, ext_ofs);
+            nl_msg_end_nested(options_buf, ext_ofs);
         }
-        return dpif_netlink_port_add__(dpif, name, ovs_type, &options,
+        return dpif_netlink_port_add__(dpif, name, ovs_type, options_buf,
                                        port_nop);
     } else {
-        return dpif_netlink_port_add__(dpif, name, ovs_type, NULL, port_nop);
+        return dpif_netlink_port_add__(dpif, name, ovs_type, options_buf, port_nop);
     }
 
+    if (options_buf)
+        ofpbuf_delete(options_buf);
 }
 
 static int
@@ -954,7 +986,7 @@ dpif_netlink_rtnl_port_create_and_add(struct dpif_netlink *dpif,
 
 static int
 dpif_netlink_port_add(struct dpif *dpif_, struct netdev *netdev,
-                      odp_port_t *port_nop)
+                      odp_port_t *port_nop, struct sset *port_names)
 {
     struct dpif_netlink *dpif = dpif_netlink_cast(dpif_);
     int error = EOPNOTSUPP;
@@ -964,7 +996,7 @@ dpif_netlink_port_add(struct dpif *dpif_, struct netdev *netdev,
         error = dpif_netlink_rtnl_port_create_and_add(dpif, netdev, port_nop);
     }
     if (error) {
-        error = dpif_netlink_port_add_compat(dpif, netdev, port_nop);
+        error = dpif_netlink_port_add_compat(dpif, netdev, port_nop, port_names);
     }
     fat_rwlock_unlock(&dpif->upcall_lock);
 

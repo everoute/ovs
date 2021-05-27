@@ -578,7 +578,8 @@ dpif_port_open_type(const char *datapath_type, const char *port_type)
  * errno value and sets '*port_nop' to ODPP_NONE (if 'port_nop' is
  * non-null). */
 int
-dpif_port_add(struct dpif *dpif, struct netdev *netdev, odp_port_t *port_nop)
+dpif_port_add(struct dpif *dpif, struct netdev *netdev, odp_port_t *port_nop,
+              struct sset *port_names)
 {
     const char *netdev_name = netdev_get_name(netdev);
     odp_port_t port_no = ODPP_NONE;
@@ -590,7 +591,7 @@ dpif_port_add(struct dpif *dpif, struct netdev *netdev, odp_port_t *port_nop)
         port_no = *port_nop;
     }
 
-    error = dpif->dpif_class->port_add(dpif, netdev, &port_no);
+    error = dpif->dpif_class->port_add(dpif, netdev, &port_no, port_names);
     if (!error) {
         VLOG_DBG_RL(&dpmsg_rl, "%s: added %s as port %"PRIu32,
                     dpif_name(dpif), netdev_name, port_no);

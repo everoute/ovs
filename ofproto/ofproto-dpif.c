@@ -434,7 +434,7 @@ type_run(const char *type)
                         odp_port_t odp_port = ODPP_NONE;
 
                         if (!dpif_port_add(backer->dpif, iter->up.netdev,
-                                           &odp_port)) {
+                                           &odp_port, NULL)) {
                             simap_put(&backer->tnl_backers, dp_port,
                                       odp_to_u32(odp_port));
                             node = simap_find(&backer->tnl_backers, dp_port);
@@ -3861,7 +3861,8 @@ port_add(struct ofproto *ofproto_, struct netdev *netdev)
         odp_port_t port_no = ODPP_NONE;
         int error;
 
-        error = dpif_port_add(ofproto->backer->dpif, netdev, &port_no);
+        error = dpif_port_add(ofproto->backer->dpif, netdev, &port_no,
+                              &ofproto->ports);
         if (error) {
             return error;
         }

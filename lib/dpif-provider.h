@@ -197,7 +197,7 @@ struct dpif_class {
      * port number.  Returns EBUSY if caller attempted to choose a port
      * number, and it was in use. */
     int (*port_add)(struct dpif *dpif, struct netdev *netdev,
-                    odp_port_t *port_no);
+                    odp_port_t *port_no, struct sset *port_names);
 
     /* Removes port numbered 'port_no' from 'dpif'. */
     int (*port_del)(struct dpif *dpif, odp_port_t port_no);
