@@ -2129,7 +2129,6 @@ netdev_dpdk_process_devargs(struct netdev_dpdk *dev,
                 new_port_id = netdev_dpdk_get_port_by_devargs(devargs);
                 if (rte_eth_dev_is_valid_port(new_port_id)) {
                     /* Attach successful */
-                    dev->attached = true;
                     VLOG_INFO("Device '%s' attached to DPDK", devargs);
                 } else {
                     /* Attach unsuccessful */
@@ -2141,6 +2140,8 @@ netdev_dpdk_process_devargs(struct netdev_dpdk *dev,
 
     if (new_port_id == DPDK_ETH_PORT_ID_INVALID) {
         VLOG_WARN_BUF(errp, "Error attaching device '%s' to DPDK", devargs);
+    } else {
+        dev->attached = true;
     }
 
     return new_port_id;
