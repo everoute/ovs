@@ -35,8 +35,11 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include "openvswitch/dynamic-string.h"
+#include "openvswitch/json.h"
 #include "flow.h"
 #include "openvswitch/list.h"
+#include "lldp/lldp-const.h"
+#include "lldp/lldp-tlv.h"
 #include "lldp/lldpd.h"
 #include "lldp/lldpd-structs.h"
 #include "netdev.h"
@@ -311,6 +314,584 @@ aa_print_isid_status(struct ds *ds, struct lldp *lldp) OVS_REQUIRES(mutex)
 }
 
 static void
+lldp_print_neighbor_port_dot1(struct ds *ds, struct lldpd_port *port)
+{
+    if (port->p_dot1_enable &
+        ((1 << LLDP_TLV_DOT1_PVID) | (1 << LLDP_TLV_DOT1_VLANNAME))) {
+        ds_put_format(ds, "  VLAN: \t");
+    }
+    if (port->p_dot1_enable & (1 << LLDP_TLV_DOT1_PVID)) {
+        ds_put_format(ds, "  %d, ", port->p_dot1.pvid);
+        if (!(port->p_dot1_enable & (1 << LLDP_TLV_DOT1_VLANNAME)) &&
+            port->p_dot1.pvid > 0) {
+            ds_put_format(ds, "pvid: yes");
+        }
+    }
+    if (port->p_dot1_enable & (1 << LLDP_TLV_DOT1_VLANNAME)) {
+        ds_put_format(ds, "pvid: %s",
+                      port->p_dot1.pvid == port->p_dot1.vlan_id ? "yes"
+                                                                : "no");
+        if (port->p_dot1.vlan_name) {
+            ds_put_format(ds, ", %s", port->p_dot1.vlan_name);
+        }
+    }
+    ds_put_format(ds, "\n");
+}
+
+static void
+lldp_print_neighbor_port_dot1_json(struct json *interface_item_json,
+                                   struct lldpd_port *port)
+{
+    struct json *vlan_json = NULL;
+    if (port->p_dot1_enable & (1 << LLDP_TLV_DOT1_PVID)) {
+        if (!vlan_json) {
+            vlan_json = json_object_create();
+        }
+        json_object_put(vlan_json, "vlan-id",
+                        json_integer_create(port->p_dot1.pvid));
+
+        if (!(port->p_dot1_enable & (1 << LLDP_TLV_DOT1_VLANNAME)) &&
+            port->p_dot1.pvid > 0) {
+            json_object_put(vlan_json, "pvid", json_boolean_create(true));
+        }
+    }
+    if (port->p_dot1_enable & (1 << LLDP_TLV_DOT1_VLANNAME)) {
+        if (!vlan_json) {
+            vlan_json = json_object_create();
+        }
+        json_object_put(
+            vlan_json, "pvid",
+            json_boolean_create(
+                port->p_dot1.pvid == port->p_dot1.vlan_id ? true : false));
+        if (port->p_dot1.vlan_name) {
+            json_object_put(vlan_json, "value",
+                            json_string_create(port->p_dot1.vlan_name));
+        }
+    }
+    if (vlan_json) {
+        json_object_put(interface_item_json, "vlan", vlan_json);
+    }
+
+    if (port->p_dot1_enable & (1 << LLDP_TLV_DOT1_PPVID)) {
+        struct json *ppid_json = json_object_create();
+        json_object_put(ppid_json, "supported",
+                        port->p_dot1.ppvid & LLDP_PPVID_CAP_SUPPORTED
+                            ? json_boolean_create(true)
+                            : json_boolean_create(false));
+        json_object_put(ppid_json, "enabled",
+                        port->p_dot1.ppvid & LLDP_PPVID_CAP_ENABLED
+                            ? json_boolean_create(true)
+                            : json_boolean_create(false));
+        json_object_put(interface_item_json, "ppid", ppid_json);
+    }
+}
+
+static void
+lldp_dot3_autoneg_advertised(struct ds *ds, uint16_t pmd_auto_nego, int bithd,
+                             int bitfd, const char *type)
+{
+    if (!((pmd_auto_nego & bithd) || (pmd_auto_nego & bitfd))) {
+        return;
+    }
+
+    ds_put_format(ds, "      Adv:\t %s", type);
+    if (bithd != bitfd) {
+        ds_put_format(ds, ", HD: %s, FD: %s\n",
+                      (pmd_auto_nego & bithd) ? "yes" : "no",
+                      (pmd_auto_nego & bitfd) ? "yes" : "no");
+    }
+}
+
+static void
+lldp_dot3_autoneg_advertised_json(struct json **advertised_json,
+                             uint16_t pmd_auto_nego, int bithd, int bitfd,
+                             const char *type)
+{
+    if (!((pmd_auto_nego & bithd) || (pmd_auto_nego & bitfd))) {
+        return;
+    }
+
+    if (!*advertised_json) {
+        *advertised_json = json_array_create_empty();
+    }
+
+    struct json *advertised_item_json = json_object_create();
+    json_object_put(advertised_item_json, "type", json_string_create(type));
+    if (bithd != bitfd) {
+        json_object_put(advertised_item_json, "hd",
+                        json_boolean_create((pmd_auto_nego & bithd) ? true
+                                                                    : false));
+        json_object_put(advertised_item_json, "fd",
+                        json_boolean_create((pmd_auto_nego & bitfd) ? true
+                                                                    : false));
+    }
+    json_array_add(*advertised_json, advertised_item_json);
+}
+
+static void
+lldp_print_neighbor_port_dot3(struct ds *ds, struct lldpd_port *port)
+{
+    if (port->p_dot3_enable & (1 << LLDP_TLV_DOT3_MFS)) {
+        ds_put_format(ds, "    MFS:\t %d\n", port->p_dot3.mfs);
+    }
+
+    if (port->p_dot3_enable & (1 << LLDP_TLV_DOT3_MAC)) {
+        ds_put_format(
+            ds, "    PMD autoneg:  supported: %s, enabled: %s\n",
+            port->p_dot3.auto_nego & LLDP_DOT3_LINK_AUTONEG_SUPPORT ? "yes"
+                                                                    : "no",
+            port->p_dot3.auto_nego & LLDP_DOT3_LINK_AUTONEG_ENABLED ? "yes"
+                                                                    : "no");
+
+        lldp_dot3_autoneg_advertised(ds, port->p_dot3.pmd_auto_nego,
+                                     LLDP_DOT3_LINK_AUTONEG_10BASE_T,
+                                     LLDP_DOT3_LINK_AUTONEG_10BASE_T_FD,
+                                     "10Base-T");
+        lldp_dot3_autoneg_advertised(ds, port->p_dot3.pmd_auto_nego,
+                                     LLDP_DOT3_LINK_AUTONEG_100BASE_T4,
+                                     LLDP_DOT3_LINK_AUTONEG_100BASE_T4,
+                                     "100Base-T4");
+        lldp_dot3_autoneg_advertised(ds, port->p_dot3.pmd_auto_nego,
+                                     LLDP_DOT3_LINK_AUTONEG_100BASE_TX,
+                                     LLDP_DOT3_LINK_AUTONEG_100BASE_TX_FD,
+                                     "100Base-TX");
+        lldp_dot3_autoneg_advertised(ds, port->p_dot3.pmd_auto_nego,
+                                     LLDP_DOT3_LINK_AUTONEG_100BASE_T2,
+                                     LLDP_DOT3_LINK_AUTONEG_100BASE_T2_FD,
+                                     "100Base-T2");
+        lldp_dot3_autoneg_advertised(ds, port->p_dot3.pmd_auto_nego,
+                                     LLDP_DOT3_LINK_AUTONEG_1000BASE_X,
+                                     LLDP_DOT3_LINK_AUTONEG_1000BASE_X_FD,
+                                     "1000Base-X");
+        lldp_dot3_autoneg_advertised(ds, port->p_dot3.pmd_auto_nego,
+                                     LLDP_DOT3_LINK_AUTONEG_1000BASE_T,
+                                     LLDP_DOT3_LINK_AUTONEG_1000BASE_T_FD,
+                                     "1000Base-T");
+        lldp_dot3_autoneg_advertised(ds, port->p_dot3.pmd_auto_nego,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_PAUSE,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_PAUSE,
+                                     "FDX_PAUSE");
+        lldp_dot3_autoneg_advertised(ds, port->p_dot3.pmd_auto_nego,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_APAUSE,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_APAUSE,
+                                     "FDX_APAUSE");
+        lldp_dot3_autoneg_advertised(ds, port->p_dot3.pmd_auto_nego,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_SPAUSE,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_SPAUSE,
+                                     "FDX_SPAUSE");
+        lldp_dot3_autoneg_advertised(ds, port->p_dot3.pmd_auto_nego,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_BPAUSE,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_BPAUSE,
+                                     "FDX_BPAUSE");
+
+        ds_put_format(ds, "      MAU oper type:\t %d\n", port->p_dot3.mau);
+    }
+
+    if (port->p_dot3_enable & (1 << LLDP_TLV_DOT3_POWER)) {
+        ds_put_format(
+            ds,
+            "    MDI Power:\t supported: %s, enabled: %s, pair control: %s\n",
+            port->p_dot3.mdi & LLDP_DOT3_POWER_SUPPORT ? "yes" : "no",
+            port->p_dot3.mdi & LLDP_DOT3_POWER_ENABLED ? "yes" : "no",
+            port->p_dot3.mdi & LLDP_DOT3_POWER_PAIRCONTROL ? "yes" : "no");
+
+        ds_put_format(ds, "      Device type:\t %s\n",
+                      port->p_dot3.mdi & LLDP_DOT3_POWER_PORT_CLASS ? "PSE"
+                                                                    : "PD");
+    }
+}
+
+static void
+lldp_print_neighbor_port_dot3_json(struct json *port_json,
+                                   struct lldpd_port *port)
+{
+    if (port->p_dot3_enable & (1 << LLDP_TLV_DOT3_MAC)) {
+        struct json *auto_nego_json = json_object_create();
+        json_object_put(auto_nego_json, "supported",
+                        port->p_dot3.auto_nego & LLDP_DOT3_LINK_AUTONEG_SUPPORT
+                            ? json_boolean_create(true)
+                            : json_boolean_create(false));
+        json_object_put(auto_nego_json, "enabled",
+                        port->p_dot3.auto_nego & LLDP_DOT3_LINK_AUTONEG_ENABLED
+                            ? json_boolean_create(true)
+                            : json_boolean_create(false));
+
+        struct json *advertised_json = NULL;
+        lldp_dot3_autoneg_advertised_json(&advertised_json,
+                                          port->p_dot3.pmd_auto_nego,
+                                          LLDP_DOT3_LINK_AUTONEG_10BASE_T,
+                                          LLDP_DOT3_LINK_AUTONEG_10BASE_T_FD,
+                                          "10Base-T");
+        lldp_dot3_autoneg_advertised_json(&advertised_json,
+                                          port->p_dot3.pmd_auto_nego,
+                                          LLDP_DOT3_LINK_AUTONEG_100BASE_T4,
+                                          LLDP_DOT3_LINK_AUTONEG_100BASE_T4,
+                                          "100Base-T4");
+        lldp_dot3_autoneg_advertised_json(&advertised_json,
+                                          port->p_dot3.pmd_auto_nego,
+                                          LLDP_DOT3_LINK_AUTONEG_100BASE_TX,
+                                          LLDP_DOT3_LINK_AUTONEG_100BASE_TX_FD,
+                                          "100Base-TX");
+        lldp_dot3_autoneg_advertised_json(&advertised_json,
+                                          port->p_dot3.pmd_auto_nego,
+                                          LLDP_DOT3_LINK_AUTONEG_100BASE_T2,
+                                          LLDP_DOT3_LINK_AUTONEG_100BASE_T2_FD,
+                                          "100Base-T2");
+        lldp_dot3_autoneg_advertised_json(&advertised_json,
+                                          port->p_dot3.pmd_auto_nego,
+                                          LLDP_DOT3_LINK_AUTONEG_1000BASE_X,
+                                          LLDP_DOT3_LINK_AUTONEG_1000BASE_X_FD,
+                                          "1000Base-X");
+        lldp_dot3_autoneg_advertised_json(&advertised_json,
+                                          port->p_dot3.pmd_auto_nego,
+                                          LLDP_DOT3_LINK_AUTONEG_1000BASE_T,
+                                          LLDP_DOT3_LINK_AUTONEG_1000BASE_T_FD,
+                                          "1000Base-T");
+        lldp_dot3_autoneg_advertised_json(&advertised_json,
+                                          port->p_dot3.pmd_auto_nego,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_PAUSE,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_PAUSE,
+                                          "FDX_PAUSE");
+        lldp_dot3_autoneg_advertised_json(&advertised_json,
+                                          port->p_dot3.pmd_auto_nego,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_APAUSE,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_APAUSE,
+                                          "FDX_APAUSE");
+        lldp_dot3_autoneg_advertised_json(&advertised_json,
+                                          port->p_dot3.pmd_auto_nego,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_SPAUSE,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_SPAUSE,
+                                          "FDX_SPAUSE");
+        lldp_dot3_autoneg_advertised_json(&advertised_json,
+                                          port->p_dot3.pmd_auto_nego,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_BPAUSE,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_BPAUSE,
+                                          "FDX_BPAUSE");
+        if (advertised_json) {
+            json_object_put(auto_nego_json, "advertised", advertised_json);
+        }
+
+        json_object_put(auto_nego_json, "current",
+                        json_integer_create(port->p_dot3.mau));
+
+        json_object_put(port_json, "auto-negotiation", auto_nego_json);
+    }
+
+    if (port->p_dot3_enable & (1 << LLDP_TLV_DOT3_POWER)) {
+        struct json *power_json = json_object_create();
+
+        json_object_put(
+            power_json, "device-type",
+            json_string_create(
+                port->p_dot3.mdi & LLDP_DOT3_POWER_PORT_CLASS ? "PSE" : "PD"));
+
+        json_object_put(
+            power_json, "supported",
+            json_boolean_create(
+                port->p_dot3.mdi & LLDP_DOT3_POWER_SUPPORT ? true : false));
+
+        json_object_put(
+            power_json, "enabled",
+            json_boolean_create(
+                port->p_dot3.mdi & LLDP_DOT3_POWER_ENABLED ? true : false));
+
+        json_object_put(power_json, "paircontrol",
+                        json_boolean_create(port->p_dot3.mdi &
+                                                    LLDP_DOT3_POWER_PAIRCONTROL
+                                                ? true
+                                                : false));
+
+        json_object_put(port_json, "power", power_json);
+    }
+
+    if (port->p_dot3_enable & (1 << LLDP_TLV_DOT3_MFS)) {
+        json_object_put(port_json, "mfs",
+                        json_integer_create(port->p_dot3.mfs));
+    }
+}
+
+static void
+lldp_print_neighbor(struct ds *ds, struct lldp *lldp) OVS_REQUIRES(mutex)
+{
+    struct lldpd_hardware *hw;
+    struct lldpd_port *port;
+    const char *none_str = "<None>";
+
+    if (!lldp->lldpd) {
+        return;
+    }
+
+    LIST_FOR_EACH (hw, h_entries, &lldp->lldpd->g_hardware) {
+        LIST_FOR_EACH (port, p_entries, &hw->h_rports) {
+            if (!port->p_chassis) {
+                continue;
+            }
+            ds_put_format(ds, "Interface: %s\n", lldp->name);
+            ds_put_format(ds, "  Chassis:\n");
+
+            struct ds id = DS_EMPTY_INITIALIZER;
+            if (port->p_chassis->c_id_len > 0) {
+                ds_put_hex_with_delimiter(&id, port->p_chassis->c_id,
+                                          port->p_chassis->c_id_len, ":");
+            }
+            ds_put_format(ds, "    Chassis ID:\t %s\n",
+                          id.length ? ds_cstr_ro(&id) : none_str);
+            ds_put_format(ds, "    SysName:\t %s\n",
+                          strlen(port->p_chassis->c_name)
+                              ? port->p_chassis->c_name
+                              : none_str);
+            ds_put_format(ds, "    SysDescr:\t %s\n",
+                          strlen(port->p_chassis->c_descr)
+                              ? port->p_chassis->c_descr
+                              : none_str);
+            ds_destroy(&id);
+
+            struct lldpd_mgmt *mgmt;
+            LIST_FOR_EACH (mgmt, m_entries, &port->p_chassis->c_mgmt) {
+                struct in6_addr ip;
+                switch (mgmt->m_family) {
+                case LLDPD_AF_IPV4:
+                    in6_addr_set_mapped_ipv4(&ip, mgmt->m_addr.inet.s_addr);
+                    break;
+                case LLDPD_AF_IPV6: ip = mgmt->m_addr.inet6; break;
+                default: continue;
+                }
+                ds_put_format(ds, "    MgmtIP:\t ");
+                ipv6_format_mapped(&ip, ds);
+                ds_put_format(ds, "\n");
+                ds_put_format(ds, "    MgmtIface:\t %d\n", mgmt->m_iface);
+            }
+
+            if (port->p_chassis->c_cap_available & LLDP_CAP_BRIDGE) {
+                ds_put_format(ds, "    Capability:\t Bridge, %s\n",
+                              port->p_chassis->c_cap_enabled & LLDP_CAP_BRIDGE
+                                  ? "on"
+                                  : "off");
+            }
+            if (port->p_chassis->c_cap_available & LLDP_CAP_ROUTER) {
+                ds_put_format(ds, "    Capability:\t Router, %s\n",
+                              port->p_chassis->c_cap_enabled & LLDP_CAP_ROUTER
+                                  ? "on"
+                                  : "off");
+            }
+            if (port->p_chassis->c_cap_available & LLDP_CAP_WLAN) {
+                ds_put_format(ds, "    Capability:\t Wlan, %s\n",
+                              port->p_chassis->c_cap_enabled & LLDP_CAP_WLAN
+                                  ? "on"
+                                  : "off");
+            }
+            if (port->p_chassis->c_cap_available & LLDP_CAP_STATION) {
+                ds_put_format(ds, "    Capability:\t Station, %s\n",
+                              port->p_chassis->c_cap_enabled & LLDP_CAP_STATION
+                                  ? "on"
+                                  : "off");
+            }
+
+            ds_put_format(ds, "  Port:\n");
+
+            if (port->p_id_subtype == LLDP_PORTID_SUBTYPE_LLADDR) {
+                ds_init(&id);
+                if (port->p_id_len > 0) {
+                    ds_put_hex_with_delimiter(&id, (uint8_t *) port->p_id,
+                                              port->p_id_len, ":");
+                }
+                ds_put_format(ds, "    PortID:\t %s\n",
+                              id.length ? ds_cstr_ro(&id) : none_str);
+                ds_destroy(&id);
+            } else {
+                ds_put_format(ds, "    PortID:\t %.*s\n",
+                              (int) (port->p_id ? port->p_id_len
+                                                : strlen(none_str)),
+                              port->p_id ?: none_str);
+            }
+            ds_put_format(ds, "    PortDescr:\t %s\n",
+                          strlen(port->p_descr) ? port->p_descr : none_str);
+            ds_put_format(ds, "    TTL:\t %d\n", port->p_chassis->c_ttl);
+
+            lldp_print_neighbor_port_dot3(ds, port);
+            lldp_print_neighbor_port_dot1(ds, port);
+
+            ds_put_format(ds, "-----------------------------------------------"
+                              "--------------------------------\n");
+        }
+    }
+}
+
+static void
+lldp_print_neighbor_json(struct json *interface_array_json, struct lldp *lldp)
+    OVS_REQUIRES(mutex)
+{
+    struct lldpd_hardware *hw;
+    struct lldpd_port *port;
+    const char *none_str = "<None>";
+
+    if (!lldp->lldpd) {
+        return;
+    }
+
+    LIST_FOR_EACH (hw, h_entries, &lldp->lldpd->g_hardware) {
+        LIST_FOR_EACH (port, p_entries, &hw->h_rports) {
+            if (!port->p_chassis) {
+                continue;
+            }
+
+            struct json *interface_item_json = json_object_create();
+            struct json *interface_item_warp_json = json_object_create();
+            struct json *chassis_json = json_object_create();
+            struct json *chassis_sys_json = json_object_create();
+            struct json *chassis_id_json = json_object_create();
+            struct json *chassis_mgmt_ip_json = json_array_create_empty();
+            struct json *chassis_mgmt_iface_json = json_array_create_empty();
+            struct json *chassis_capability_json = json_array_create_empty();
+            struct json *chassis_capability_item_json;
+            struct json *port_json = json_object_create();
+            struct json *port_id_json = json_object_create();
+
+            struct ds id = DS_EMPTY_INITIALIZER;
+            if (port->p_chassis->c_id_len > 0) {
+                ds_put_hex_with_delimiter(&id, port->p_chassis->c_id,
+                                          port->p_chassis->c_id_len, ":");
+            }
+
+            json_object_put(chassis_id_json, "type",
+                            json_string_create("mac"));
+            json_object_put(chassis_id_json, "value",
+                            json_string_create(id.length ? ds_cstr_ro(&id)
+                                                         : none_str));
+            json_object_put(chassis_sys_json, "id", chassis_id_json);
+
+            json_object_put(chassis_json,
+                            strlen(port->p_chassis->c_name)
+                                ? port->p_chassis->c_name
+                                : none_str,
+                            chassis_sys_json);
+
+            json_object_put(chassis_sys_json, "descr",
+                            json_string_create(strlen(port->p_chassis->c_descr)
+                                                   ? port->p_chassis->c_descr
+                                                   : none_str));
+
+            ds_destroy(&id);
+
+            struct lldpd_mgmt *mgmt;
+            struct in6_addr ip;
+            char addr_str[INET6_ADDRSTRLEN];
+            LIST_FOR_EACH (mgmt, m_entries, &port->p_chassis->c_mgmt) {
+                switch (mgmt->m_family) {
+                case LLDPD_AF_IPV4:
+                    in6_addr_set_mapped_ipv4(&ip, mgmt->m_addr.inet.s_addr);
+                    break;
+                case LLDPD_AF_IPV6: ip = mgmt->m_addr.inet6; break;
+                default: continue;
+                }
+
+                ipv6_string_mapped(addr_str, &ip);
+                json_array_add(chassis_mgmt_ip_json,
+                               json_string_create(addr_str));
+                json_array_add(chassis_mgmt_iface_json,
+                               json_integer_create(mgmt->m_iface));
+            }
+            json_object_put(chassis_sys_json, "mgmt-ip", chassis_mgmt_ip_json);
+            json_object_put(chassis_sys_json, "mgmt-iface",
+                            chassis_mgmt_iface_json);
+
+            if (port->p_chassis->c_cap_available & LLDP_CAP_BRIDGE) {
+                chassis_capability_item_json = json_object_create();
+                json_object_put(chassis_capability_item_json, "type",
+                                json_string_create("Bridge"));
+                json_object_put(
+                    chassis_capability_item_json, "enabled",
+                    json_boolean_create(port->p_chassis->c_cap_enabled &
+                                        LLDP_CAP_BRIDGE));
+                json_array_add(chassis_capability_json,
+                               chassis_capability_item_json);
+            }
+            if (port->p_chassis->c_cap_available & LLDP_CAP_ROUTER) {
+                chassis_capability_item_json = json_object_create();
+                json_object_put(chassis_capability_item_json, "type",
+                                json_string_create("Router"));
+                json_object_put(
+                    chassis_capability_item_json, "enabled",
+                    json_boolean_create(port->p_chassis->c_cap_enabled &
+                                        LLDP_CAP_ROUTER));
+                json_array_add(chassis_capability_json,
+                               chassis_capability_item_json);
+            }
+            if (port->p_chassis->c_cap_available & LLDP_CAP_WLAN) {
+                chassis_capability_item_json = json_object_create();
+                json_object_put(chassis_capability_item_json, "type",
+                                json_string_create("Wlan"));
+                json_object_put(
+                    chassis_capability_item_json, "enabled",
+                    json_boolean_create(port->p_chassis->c_cap_enabled &
+                                        LLDP_CAP_WLAN));
+                json_array_add(chassis_capability_json,
+                               chassis_capability_item_json);
+            }
+            if (port->p_chassis->c_cap_available & LLDP_CAP_STATION) {
+                chassis_capability_item_json = json_object_create();
+                json_object_put(chassis_capability_item_json, "type",
+                                json_string_create("Station"));
+                json_object_put(
+                    chassis_capability_item_json, "enabled",
+                    json_boolean_create(port->p_chassis->c_cap_enabled &
+                                        LLDP_CAP_STATION));
+                json_array_add(chassis_capability_json,
+                               chassis_capability_item_json);
+            }
+            json_object_put(chassis_sys_json, "capability",
+                            chassis_capability_json);
+
+            if (port->p_id_subtype == LLDP_PORTID_SUBTYPE_LLADDR) {
+                ds_init(&id);
+                if (port->p_id_len > 0) {
+                    ds_put_hex_with_delimiter(&id, port->p_id, port->p_id_len,
+                                              ":");
+                }
+                json_object_put(port_id_json, "type",
+                                json_string_create("mac"));
+                json_object_put(port_id_json, "value",
+                                json_string_create(id.length ? ds_cstr_ro(&id)
+                                                             : none_str));
+
+                ds_destroy(&id);
+            } else {
+                json_object_put(port_id_json, "type",
+                                json_string_create("ifname"));
+                if (port->p_id) {
+                    struct ds port_ds = DS_EMPTY_INITIALIZER;
+                    ds_put_buffer(&port_ds, port->p_id, port->p_id_len);
+                    json_object_put(port_id_json, "value",
+                                    json_string_create(ds_cstr_ro(&port_ds)));
+                    ds_destroy(&port_ds);
+                } else {
+                    json_object_put(port_id_json, "value",
+                                    json_string_create(none_str));
+                }
+            }
+            json_object_put(port_json, "id", port_id_json);
+
+            json_object_put(port_json, "desc",
+                            json_string_create(strlen(port->p_descr)
+                                                   ? port->p_descr
+                                                   : none_str));
+            json_object_put(port_json, "ttl",
+                            json_integer_create(port->p_chassis->c_ttl));
+
+            lldp_print_neighbor_port_dot1_json(interface_item_json, port);
+            lldp_print_neighbor_port_dot3_json(port_json, port);
+
+            json_object_put(interface_item_json, "chassis", chassis_json);
+            json_object_put(interface_item_json, "port", port_json);
+
+            json_object_put(interface_item_warp_json, lldp->name,
+                            interface_item_json);
+            json_array_add(interface_array_json, interface_item_warp_json);
+        }
+    }
+}
+
+static void
 aa_unixctl_status(struct unixctl_conn *conn, int argc OVS_UNUSED,
                   const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
     OVS_EXCLUDED(mutex)
@@ -366,6 +947,53 @@ aa_unixctl_statistics(struct unixctl_conn *conn, int argc OVS_UNUSED,
     ovs_mutex_unlock(&mutex);
 
     unixctl_command_reply(conn, ds_cstr(&ds));
+}
+
+static void
+lldp_unixctl_show_neighbor(struct unixctl_conn *conn, int argc,
+                           const char *argv[], void *aux OVS_UNUSED)
+    OVS_EXCLUDED(mutex)
+{
+    struct lldp *lldp;
+
+    if (unixctl_command_get_output_format(conn) == UNIXCTL_OUTPUT_FMT_JSON) {
+        struct json *lldp_json = json_object_create();
+        struct json *interface_json = json_object_create();
+        struct json *interface_array_json = json_array_create_empty();
+
+        ovs_mutex_lock(&mutex);
+        HMAP_FOR_EACH (lldp, hmap_node, all_lldps) {
+            if (argc > 1 && strcmp(argv[1], lldp->name)) {
+                continue;
+            }
+            lldp_print_neighbor_json(interface_array_json,lldp);
+        }
+        ovs_mutex_unlock(&mutex);
+
+        json_object_put(interface_json, "interface", interface_array_json);
+        json_object_put(lldp_json, "lldp", interface_json);
+
+        unixctl_command_reply_json(conn, lldp_json);
+    } else {
+        struct ds ds = DS_EMPTY_INITIALIZER;
+
+        ds_put_format(&ds, "--------------------------------------------------"
+                           "-----------------------------\nLLDP neighbor:\n"
+                           "--------------------------------------------------"
+                           "-----------------------------\n");
+
+        ovs_mutex_lock(&mutex);
+        HMAP_FOR_EACH (lldp, hmap_node, all_lldps) {
+            if (argc > 1 && strcmp(argv[1], lldp->name)) {
+                continue;
+            }
+            lldp_print_neighbor(&ds, lldp);
+        }
+        ovs_mutex_unlock(&mutex);
+
+        unixctl_command_reply(conn, ds_cstr(&ds));
+        ds_destroy(&ds);
+    }
 }
 
 /* An Auto Attach mapping was configured.  Populate the corresponding
@@ -635,6 +1263,8 @@ lldp_init(void)
                              aa_unixctl_show_isid, NULL);
     unixctl_command_register("autoattach/statistics", "[bridge]", 0, 1,
                              aa_unixctl_statistics, NULL);
+    unixctl_command_register("lldp/neighbor", "[interface]", 0, 1,
+                             lldp_unixctl_show_neighbor, NULL);
 }
 
 /* Returns true if 'lldp' should process packets from 'flow'.  Sets
@@ -974,4 +1604,3 @@ lldp_destroy_dummy(struct lldp *lldp)
 
     free(lldp);
 }
-
