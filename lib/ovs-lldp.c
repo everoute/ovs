@@ -34,6 +34,7 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include "lldp/lldp-const.h"
 #include "openvswitch/dynamic-string.h"
 #include "flow.h"
 #include "openvswitch/list.h"
@@ -325,6 +326,112 @@ aa_print_isid_status(struct ds *ds, struct lldp *lldp) OVS_REQUIRES(mutex)
 }
 
 static void
+lldp_print_neighbor_port(struct ds *ds, struct lldpd_hardware *hw)
+{
+    struct lldpd_port *port;
+    const char *none_str = "<None>";
+
+    LIST_FOR_EACH (port, p_entries, &hw->h_rports) {
+        if (!port->p_chassis) {
+            continue;
+        }
+        ds_put_format(ds, "  Chassis:\n");
+        char *id = NULL;
+        if (port->p_chassis->c_id_len > 0) {
+            chassisid_to_string(port->p_chassis->c_id,
+                                port->p_chassis->c_id_len, &id);
+        }
+        ds_put_format(ds, "    Chassis ID:\t %s\n", id ?: none_str);
+        ds_put_format(ds, "    SysName:\t %s\n",
+                      strlen(port->p_chassis->c_name) ? port->p_chassis->c_name
+                                                      : none_str);
+        ds_put_format(ds, "    SysDescr:\t %s\n",
+                      strlen(port->p_chassis->c_descr)
+                          ? port->p_chassis->c_descr
+                          : none_str);
+        free(id);
+
+        struct lldpd_mgmt *mgmt;
+        struct in6_addr ip;
+        LIST_FOR_EACH (mgmt, m_entries, &port->p_chassis->c_mgmt) {
+            switch (mgmt->m_family) {
+            case LLDPD_AF_IPV4:
+                in6_addr_set_mapped_ipv4(&ip, mgmt->m_addr.inet.s_addr);
+                break;
+            case LLDPD_AF_IPV6: ip = mgmt->m_addr.inet6; break;
+            default: continue;
+            }
+            ds_put_format(ds, "    MgmtIP:\t ");
+            ipv6_format_mapped(&ip, ds);
+            ds_put_format(ds, "\n");
+            ds_put_format(ds, "    MgmtIface:\t %d\n", mgmt->m_iface);
+        }
+
+        if (port->p_chassis->c_cap_available & LLDP_CAP_BRIDGE) {
+            ds_put_format(ds, "    Capability:\t Bridge, %s\n",
+                          port->p_chassis->c_cap_enabled & LLDP_CAP_BRIDGE
+                              ? "on"
+                              : "off");
+        }
+        if (port->p_chassis->c_cap_available & LLDP_CAP_ROUTER) {
+            ds_put_format(ds, "    Capability:\t Router, %s\n",
+                          port->p_chassis->c_cap_enabled & LLDP_CAP_ROUTER
+                              ? "on"
+                              : "off");
+        }
+        if (port->p_chassis->c_cap_available & LLDP_CAP_WLAN) {
+            ds_put_format(
+                ds, "    Capability:\t Wlan, %s\n",
+                port->p_chassis->c_cap_enabled & LLDP_CAP_WLAN ? "on" : "off");
+        }
+        if (port->p_chassis->c_cap_available & LLDP_CAP_STATION) {
+            ds_put_format(ds, "    Capability:\t Station, %s\n",
+                          port->p_chassis->c_cap_enabled & LLDP_CAP_STATION
+                              ? "on"
+                              : "off");
+        }
+
+        ds_put_format(ds, "  Port:\n");
+
+        if (port->p_id_subtype == LLDP_PORTID_SUBTYPE_LLADDR) {
+            id = NULL;
+            if (port->p_id_len > 0) {
+                chassisid_to_string((uint8_t *) port->p_id, port->p_id_len,
+                                    &id);
+            }
+            ds_put_format(ds, "    PortID:\t %s\n", id ?: none_str);
+            free(id);
+        } else {
+            ds_put_format(ds, "    PortID:\t %s\n", port->p_id ?: none_str);
+        }
+        ds_put_format(ds, "    PortDescr:\t %s\n",
+                      strlen(port->p_descr) ? port->p_descr : none_str);
+        ds_put_format(ds, "    TTL:\t %d\n", port->p_chassis->c_ttl);
+        if (port->p_mfs) {
+            ds_put_format(ds, "    MFS:\t %d\n", port->p_mfs);
+        }
+    }
+}
+
+static void
+lldp_print_neighbor(struct ds *ds, struct lldp *lldp) OVS_REQUIRES(mutex)
+{
+    struct lldpd_hardware *hw;
+
+    ds_put_format(ds, "Interface: %s\n", lldp->name);
+
+    if (!lldp->lldpd) {
+        return;
+    }
+
+    LIST_FOR_EACH (hw, h_entries, &lldp->lldpd->g_hardware) {
+        lldp_print_neighbor_port(ds, hw);
+    }
+    ds_put_format(ds, "------------------------------------------------------"
+                      "-------------------------\n");
+}
+
+static void
 aa_unixctl_status(struct unixctl_conn *conn, int argc OVS_UNUSED,
                   const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
     OVS_EXCLUDED(mutex)
@@ -380,6 +487,32 @@ aa_unixctl_statistics(struct unixctl_conn *conn, int argc OVS_UNUSED,
     ovs_mutex_unlock(&mutex);
 
     unixctl_command_reply(conn, ds_cstr(&ds));
+}
+
+static void
+lldp_unixctl_show_neighbor(struct unixctl_conn *conn, int argc,
+                           const char *argv[], void *aux OVS_UNUSED)
+    OVS_EXCLUDED(mutex)
+{
+    struct lldp *lldp;
+    struct ds ds = DS_EMPTY_INITIALIZER;
+
+    ds_put_format(&ds, "------------------------------------------------------"
+                       "-------------------------\nLLDP neighbors:\n"
+                       "------------------------------------------"
+                       "-------------------------------------\n");
+
+    ovs_mutex_lock(&mutex);
+    HMAP_FOR_EACH (lldp, hmap_node, all_lldps) {
+        if (argc > 1 && strcmp(argv[1], lldp->name)) {
+            continue;
+        }
+        lldp_print_neighbor(&ds, lldp);
+    }
+    ovs_mutex_unlock(&mutex);
+
+    unixctl_command_reply(conn, ds_cstr(&ds));
+    ds_destroy(&ds);
 }
 
 /* An Auto Attach mapping was configured.  Populate the corresponding
@@ -649,6 +782,8 @@ lldp_init(void)
                              aa_unixctl_show_isid, NULL);
     unixctl_command_register("autoattach/statistics", "[bridge]", 0, 1,
                              aa_unixctl_statistics, NULL);
+    unixctl_command_register("lldp/neighbor", "[interface]", 0, 1,
+                             lldp_unixctl_show_neighbor, NULL);
 }
 
 /* Returns true if 'lldp' should process packets from 'flow'.  Sets
