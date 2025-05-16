@@ -5,7 +5,34 @@ v3.3.5 - 02 Jun 2025
 --------------------
    - Bug fixes
    - DPDK:
+<<<<<<< HEAD
      * OVS validated with DPDK 23.11.4.
+=======
+     * New debug appctl command 'dpdk/get-memzone-stats'.
+     * OVS validated with DPDK 24.11.2.
+   - ovs-ctl:
+     * Added a new option, --oom-score=<score>, to set the daemons' Linux
+       Out-Of-Memory (OOM) killer score.
+     * Added a new option, --ulimit-core=<LIMIT>, to set the daemon's ulimit
+       core file size.
+   - ovs-appctl:
+     * Added JSON output support to the 'ovs/route/show' command.
+     * Added 'lldp/neighbor' command that displays lldp neighbor infomation.
+   - SSL/TLS:
+     * Support for deprecated TLSv1 and TLSv1.1 protocols on OpenFlow and
+       database connections is now removed.
+   - Tunnels:
+     * Support for previously deprecated LISP and STT tunnel port types
+       is now removed.
+   - ovs-tcpdump:
+     * Update the --mirror-to option, adding support for specifying an
+       existing port as a mirror interface.
+   - Updated documentation to remove most documentation of kernel module
+     that was previously part of the OVS distribution. It was removed from
+     the OVS distribution in the 3.0 release and is no longer present in
+     any supported versions of OVS. The remaining documentation of this
+     kernel module relates to topics for older releases of OVS.
+>>>>>>> 9ea0c03d2 (lldp: Add ovs-appctl lldp/neighbor command.)
 
 v3.3.4 - 27 Feb 2025
 --------------------
