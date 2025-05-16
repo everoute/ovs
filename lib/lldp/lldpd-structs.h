@@ -79,6 +79,24 @@ struct lldpd_chassis {
 /* WARNING: any change to this structure should also be reflected into
    `lldpd_copy_chassis()` which is not using marshaling. */
 
+struct lldpd_tlv_dot1 {
+    u_int16_t       pvid;       /* Port VLAN identifier */
+    u_int16_t       ppvid;      /* Port and protocol VLAN identifier */
+    char            *vlan_name; /* VLAN Name in LLDP_TLV_DOT1_VLANNAME */
+    u_int16_t       vlan_id;    /* VLAN ID in LLDP_TLV_DOT1_VLANNAME */
+    char            *pi;        /* protocol identity */
+};
+
+struct lldpd_tlv_dot3 {
+    u_int8_t  auto_nego;     /* auto-negotiation support/status  */
+    u_int16_t pmd_auto_nego; /* PMD auto-negotiation advertised capability */
+    u_int16_t mau;           /* Operational MAU type */
+    u_int8_t  mdi;           /* MDI power support */
+    u_int8_t  pse;           /* PSE power pair */
+    u_int8_t  power_class;   /* Port class */
+    u_int16_t mfs;           /* Maximum 802.3 frame size */
+};
+
 struct lldpd_port {
     struct ovs_list      p_entries;
     struct lldpd_chassis *p_chassis; /* Attached chassis */
@@ -98,6 +116,12 @@ struct lldpd_port {
     char                 *p_descr;
     u_int16_t            p_mfs;
     struct lldpd_aa_element_tlv        p_element;
+    /* Bitmask for dot1 tlv received */
+    u_int16_t                          p_dot1_enable;
+    struct lldpd_tlv_dot1              p_dot1;
+    /* Bitmask for dot3 tlv received */
+    u_int16_t                          p_dot3_enable;
+    struct lldpd_tlv_dot3              p_dot3;
     struct ovs_list p_isid_vlan_maps; /* Contains "struct lldpd_aa_isid_vlan_maps_tlv"s. */
 };
 
