@@ -137,7 +137,7 @@ jobs:
     env:
       dependencies: |
         automake libtool gcc bc libjemalloc2 libjemalloc-dev libssl-dev \
-        llvm-dev libnuma-dev selinux-policy-dev libxdp-dev lftp
+        llvm-dev libnuma-dev selinux-policy-dev libxdp-dev lftp jq
       CC:          ${{ matrix.compiler }}
       DPDK:        ${{ matrix.dpdk }}
       DPDK_SHARED: ${{ matrix.dpdk_shared }}
