@@ -38,6 +38,7 @@
 #include "ovs-thread.h"
 #include "socket-util.h"
 #include "timeval.h"
+#include "openvswitch/dynamic-string.h"
 #include "openvswitch/vlog.h"
 #ifdef HAVE_PTHREAD_SET_NAME_NP
 #include <pthread_np.h>
@@ -1076,6 +1077,18 @@ free:
     }
 
     return 0;
+}
+/* Converts a uint8 array to a hex string.
+ * If delimiter is not NULL, it will be added between each hex character. */
+void
+format_hex_arg(struct ds *s, const uint8_t *data, size_t len, char *delimiter)
+{
+    for (size_t i = 0; i < len; i++) {
+        if (i && delimiter) {
+            ds_put_format(s, "%s", delimiter);
+        }
+        ds_put_format(s, "%02" PRIx8, data[i]);
+    }
 }
 
 /* Returns the current working directory as a malloc()'d string, or a null

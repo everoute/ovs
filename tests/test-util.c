@@ -1183,6 +1183,25 @@ test_sat_math(struct ovs_cmdl_context *ctx OVS_UNUSED)
     }
 }
 
+static void
+test_format_hex_arg(struct ovs_cmdl_context *ctx OVS_UNUSED)
+{
+    struct ds ds = DS_EMPTY_INITIALIZER;
+    uint8_t array[6] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06 };
+    char str1[] = "01.02.03.04.05.06";
+    char str2[] = "010203040506";
+
+    format_hex_arg(&ds, array, 6, ".");
+    ovs_assert(!strcmp(ds_cstr_ro(&ds), str1));
+
+    ds_clear(&ds);
+
+    format_hex_arg(&ds, array, 6, NULL);
+    ovs_assert(!strcmp(ds_cstr_ro(&ds), str2));
+
+    ds_destroy(&ds);
+}
+
 #ifndef _WIN32
 static void
 test_file_name(struct ovs_cmdl_context *ctx)
@@ -1220,6 +1239,7 @@ static const struct ovs_cmdl_command commands[] = {
     {"ovs_scan", NULL, 0, 0, test_ovs_scan, OVS_RO},
     {"snprintf", NULL, 0, 0, test_snprintf, OVS_RO},
     {"sat_math", NULL, 0, 0, test_sat_math, OVS_RO},
+    {"format_hex_arg", NULL, 0, 0, test_format_hex_arg, OVS_RO},
 #ifndef _WIN32
     {"file_name", NULL, 1, INT_MAX, test_file_name, OVS_RO},
 #endif

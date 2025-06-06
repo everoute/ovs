@@ -249,6 +249,10 @@ AT_KEYWORDS([sat math sat_math])
 AT_CHECK([ovstest test-util sat_math])
 AT_CLEANUP
 
+AT_SETUP([format_hex_arg])
+AT_CHECK([ovstest test-util format_hex_arg])
+AT_CLEANUP
+
 AT_SETUP([snprintf])
 AT_CHECK([ovstest test-util snprintf])
 AT_CLEANUP

@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "compiler.h"
+#include "openvswitch/dynamic-string.h"
 #include "openvswitch/util.h"
 #if defined(__aarch64__) && __GNUC__ >= 6
 #include <arm_neon.h>
@@ -258,6 +259,9 @@ uintmax_t hexits_value(const char *s, size_t n, bool *ok);
 
 int parse_int_string(const char *s, uint8_t *valuep, int field_width,
                      char **tail);
+
+void
+format_hex_arg(struct ds *s, const uint8_t *data, size_t len, char *delimiter);
 
 const char *english_list_delimiter(size_t index, size_t total);
 
