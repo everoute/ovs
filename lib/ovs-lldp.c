@@ -365,6 +365,312 @@ lldp_get_network_addr_string(char *port_id)
 }
 
 static void
+lldp_print_neighbor_port_dot1(struct ds *ds, struct lldpd_port *port)
+{
+    struct lldpd_ppvid *ppvid;
+    struct lldpd_vlan *vlan;
+    bool foundpvid = false;
+    struct lldpd_pi *pid;
+
+    LIST_FOR_EACH (vlan, v_entries, &port->p_vlans) {
+        ds_put_format(ds, "  %-20s%d, %s", "VLAN:", vlan->v_vid,
+                      port->p_pvid == vlan->v_vid ? "pvid: yes" : "pvid: no");
+        if (port->p_pvid == vlan->v_vid) {
+            foundpvid = true;
+        }
+        if (vlan->v_name) {
+            ds_put_format(ds, ", %s", vlan->v_name);
+        }
+        ds_put_format(ds, "\n");
+    }
+    if (!foundpvid && port->p_pvid > 0) {
+        ds_put_format(ds, "  %-20s%d, %s\n", "VLAN:", port->p_pvid,
+                      "pvid: yes");
+    }
+
+    LIST_FOR_EACH (ppvid, p_entries, &port->p_ppvids) {
+        ds_put_format(ds, "  %-20s%d, ", "PPVID:", ppvid->p_ppvid);
+        ds_put_format(
+            ds, "supported: %s,enabled %s\n",
+            (ppvid->p_cap_status & LLDP_PPVID_CAP_SUPPORTED) ? "yes" : "no",
+            (ppvid->p_cap_status & LLDP_PPVID_CAP_ENABLED) ? "yes" : "no");
+    }
+
+    LIST_FOR_EACH (pid, p_entries, &port->p_pids) {
+        if (pid->p_pi && pid->p_pi_len > 0) {
+            ds_put_format(ds, "  %-20s", "PI:");
+            ds_put_buffer(ds, pid->p_pi, pid->p_pi_len);
+            ds_put_format(ds, "\n");
+        }
+    }
+}
+
+static void
+lldp_print_neighbor_port_dot1_json(struct json *neighbor_item_json,
+                                   struct lldpd_port *port)
+{
+    struct json *ppvid_json_array = json_array_create_empty();
+    struct json *vlan_json_array = json_array_create_empty();
+    struct json *pi_json_array = json_array_create_empty();
+    struct json *ppvid_json = NULL;
+    struct json *vlan_json = NULL;
+    struct json *pi_json = NULL;
+    bool foundpvid = false;
+
+    struct lldpd_ppvid *ppvid;
+    struct lldpd_vlan *vlan;
+    struct lldpd_pi *pid;
+
+    LIST_FOR_EACH (vlan, v_entries, &port->p_vlans) {
+        vlan_json = json_object_create();
+        json_object_put(vlan_json, "vlan-id",
+                        json_integer_create(vlan->v_vid));
+        json_object_put(vlan_json, "pvid",
+                        json_boolean_create(port->p_pvid == vlan->v_vid));
+        if (port->p_pvid == vlan->v_vid) {
+            foundpvid = true;
+        }
+        if (vlan->v_name) {
+            json_object_put(vlan_json, "value",
+                            json_string_create(vlan->v_name));
+        }
+        json_array_add(vlan_json_array, vlan_json);
+    }
+    if (!foundpvid && port->p_pvid > 0) {
+        vlan_json = json_object_create();
+        json_object_put(vlan_json, "vlan-id",
+                        json_integer_create(port->p_pvid));
+        json_object_put(vlan_json, "pvid", json_boolean_create(true));
+        json_array_add(vlan_json_array, vlan_json);
+    }
+    if (json_array_size(vlan_json_array) > 0) {
+        json_object_put(neighbor_item_json, "vlan", vlan_json_array);
+    }
+
+    LIST_FOR_EACH (ppvid, p_entries, &port->p_ppvids) {
+        ppvid_json = json_object_create();
+        if (ppvid->p_ppvid) {
+            json_object_put(ppvid_json, "ppvid",
+                            json_integer_create(ppvid->p_ppvid));
+        }
+        json_object_put(ppvid_json, "supported",
+                        json_boolean_create(ppvid->p_cap_status &
+                                            LLDP_PPVID_CAP_SUPPORTED));
+        json_object_put(ppvid_json, "enabled",
+                        json_boolean_create(ppvid->p_cap_status &
+                                            LLDP_PPVID_CAP_ENABLED));
+        json_array_add(ppvid_json_array, ppvid_json);
+    }
+    if (json_array_size(ppvid_json_array) > 0) {
+        json_object_put(neighbor_item_json, "ppvid", ppvid_json_array);
+    }
+
+    LIST_FOR_EACH (pid, p_entries, &port->p_pids) {
+        if (pid->p_pi && pid->p_pi_len > 0) {
+            pi_json = json_object_create();
+            struct ds pi_ds = DS_EMPTY_INITIALIZER;
+            ds_put_buffer(&pi_ds, pid->p_pi, pid->p_pi_len);
+            json_object_put(pi_json, "pi",
+                            json_string_create_nocopy(ds_steal_cstr(&pi_ds)));
+            json_array_add(pi_json_array, pi_json);
+        }
+    }
+    if (json_array_size(pi_json_array) > 0) {
+        json_object_put(neighbor_item_json, "pi", pi_json_array);
+    }
+}
+
+static void
+lldp_dot3_autoneg_advertised(struct ds *ds, uint16_t pmd_auto_nego, int bithd,
+                             int bitfd, const char *type)
+{
+    if (!((pmd_auto_nego & bithd) || (pmd_auto_nego & bitfd))) {
+        return;
+    }
+
+    ds_put_format(ds, "    %-18s%s", "Adv:", type);
+    if (bithd != bitfd) {
+        ds_put_format(ds, ", HD: %s, FD: %s\n",
+                      (pmd_auto_nego & bithd) ? "yes" : "no",
+                      (pmd_auto_nego & bitfd) ? "yes" : "no");
+    }
+}
+
+static void
+lldp_dot3_autoneg_advertised_json(struct json **advertised_json,
+                                  uint16_t pmd_auto_nego, int bithd, int bitfd,
+                                  const char *type)
+{
+    if (!((pmd_auto_nego & bithd) || (pmd_auto_nego & bitfd))) {
+        return;
+    }
+
+    if (!*advertised_json) {
+        *advertised_json = json_array_create_empty();
+    }
+
+    struct json *advertised_item_json = json_object_create();
+    json_object_put(advertised_item_json, "type", json_string_create(type));
+    if (bithd != bitfd) {
+        json_object_put(advertised_item_json, "hd",
+                        json_boolean_create((pmd_auto_nego & bithd) ? true
+                                                                    : false));
+        json_object_put(advertised_item_json, "fd",
+                        json_boolean_create((pmd_auto_nego & bitfd) ? true
+                                                                    : false));
+    }
+    json_array_add(*advertised_json, advertised_item_json);
+}
+
+static void
+lldp_print_neighbor_port_dot3(struct ds *ds, struct lldpd_port *port)
+{
+    if (port->p_mfs) {
+        ds_put_format(ds, "  %-20s%d\n", "MFS:", port->p_mfs);
+    }
+
+    uint16_t autoneg_advertised = port->p_macphy.autoneg_advertised;
+    uint16_t autoneg_support = port->p_macphy.autoneg_support;
+    uint16_t autoneg_enabled = port->p_macphy.autoneg_enabled;
+    uint16_t mautype = port->p_macphy.mau_type;
+    if (autoneg_support || autoneg_enabled || mautype) {
+        ds_put_format(ds, "  PMD autoneg: supported: %s, enabled: %s\n",
+                      autoneg_support ? "yes" : "no",
+                      autoneg_enabled ? "yes" : "no");
+        lldp_dot3_autoneg_advertised(ds, autoneg_advertised,
+                                     LLDP_DOT3_LINK_AUTONEG_10BASE_T,
+                                     LLDP_DOT3_LINK_AUTONEG_10BASET_FD,
+                                     "10Base-T");
+        lldp_dot3_autoneg_advertised(ds, autoneg_advertised,
+                                     LLDP_DOT3_LINK_AUTONEG_100BASE_T4,
+                                     LLDP_DOT3_LINK_AUTONEG_100BASE_T4,
+                                     "100Base-T4");
+        lldp_dot3_autoneg_advertised(ds, autoneg_advertised,
+                                     LLDP_DOT3_LINK_AUTONEG_100BASE_TX,
+                                     LLDP_DOT3_LINK_AUTONEG_100BASE_TXFD,
+                                     "100Base-TX");
+        lldp_dot3_autoneg_advertised(ds, autoneg_advertised,
+                                     LLDP_DOT3_LINK_AUTONEG_100BASE_T2,
+                                     LLDP_DOT3_LINK_AUTONEG_100BASE_T2FD,
+                                     "100Base-T2");
+        lldp_dot3_autoneg_advertised(ds, autoneg_advertised,
+                                     LLDP_DOT3_LINK_AUTONEG_1000BASE_X,
+                                     LLDP_DOT3_LINK_AUTONEG_1000BASE_XFD,
+                                     "1000Base-X");
+        lldp_dot3_autoneg_advertised(ds, autoneg_advertised,
+                                     LLDP_DOT3_LINK_AUTONEG_1000BASE_T,
+                                     LLDP_DOT3_LINK_AUTONEG_1000BASE_TFD,
+                                     "1000Base-T");
+        lldp_dot3_autoneg_advertised(ds, autoneg_advertised,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_PAUSE,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_PAUSE,
+                                     "FDX_PAUSE");
+        lldp_dot3_autoneg_advertised(ds, autoneg_advertised,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_APAUSE,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_APAUSE,
+                                     "FDX_APAUSE");
+        lldp_dot3_autoneg_advertised(ds, autoneg_advertised,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_SPAUSE,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_SPAUSE,
+                                     "FDX_SPAUSE");
+        lldp_dot3_autoneg_advertised(ds, autoneg_advertised,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_BPAUSE,
+                                     LLDP_DOT3_LINK_AUTONEG_FDX_BPAUSE,
+                                     "FDX_BPAUSE");
+        ds_put_format(ds, "    %-18s%hu\n", "MAU oper type:", mautype);
+    }
+
+    if (port->p_power.devicetype) {
+        ds_put_format(ds,
+                      "  MDI Power: supported: %s, enabled: %s, pair "
+                      "control: %s\n",
+                      port->p_power.supported ? "yes" : "no",
+                      port->p_power.enabled ? "yes" : "no",
+                      port->p_power.paircontrol ? "yes" : "no");
+    }
+}
+
+static void
+lldp_print_neighbor_port_dot3_json(struct json *port_json,
+                                   struct lldpd_port *port)
+{
+    if (port->p_mfs) {
+        json_object_put(port_json, "mfs", json_integer_create(port->p_mfs));
+    }
+
+    uint16_t autoneg_advertised = port->p_macphy.autoneg_advertised;
+    uint16_t autoneg_support = port->p_macphy.autoneg_support;
+    uint16_t autoneg_enabled = port->p_macphy.autoneg_enabled;
+    uint16_t mautype = port->p_macphy.mau_type;
+    if (autoneg_support || autoneg_enabled || mautype) {
+        struct json *auto_nego_json = json_object_create();
+        struct json *advertised_json = NULL;
+
+        json_object_put(auto_nego_json, "supported",
+                        json_boolean_create(autoneg_support));
+        json_object_put(auto_nego_json, "enabled",
+                        json_boolean_create(autoneg_enabled));
+
+        lldp_dot3_autoneg_advertised_json(&advertised_json, autoneg_advertised,
+                                          LLDP_DOT3_LINK_AUTONEG_10BASE_T,
+                                          LLDP_DOT3_LINK_AUTONEG_10BASET_FD,
+                                          "10Base-T");
+        lldp_dot3_autoneg_advertised_json(&advertised_json, autoneg_advertised,
+                                          LLDP_DOT3_LINK_AUTONEG_100BASE_T4,
+                                          LLDP_DOT3_LINK_AUTONEG_100BASE_T4,
+                                          "100Base-T4");
+        lldp_dot3_autoneg_advertised_json(&advertised_json, autoneg_advertised,
+                                          LLDP_DOT3_LINK_AUTONEG_100BASE_TX,
+                                          LLDP_DOT3_LINK_AUTONEG_100BASE_TXFD,
+                                          "100Base-TX");
+        lldp_dot3_autoneg_advertised_json(&advertised_json, autoneg_advertised,
+                                          LLDP_DOT3_LINK_AUTONEG_100BASE_T2,
+                                          LLDP_DOT3_LINK_AUTONEG_100BASE_T2FD,
+                                          "100Base-T2");
+        lldp_dot3_autoneg_advertised_json(&advertised_json, autoneg_advertised,
+                                          LLDP_DOT3_LINK_AUTONEG_1000BASE_X,
+                                          LLDP_DOT3_LINK_AUTONEG_1000BASE_XFD,
+                                          "1000Base-X");
+        lldp_dot3_autoneg_advertised_json(&advertised_json, autoneg_advertised,
+                                          LLDP_DOT3_LINK_AUTONEG_1000BASE_T,
+                                          LLDP_DOT3_LINK_AUTONEG_1000BASE_TFD,
+                                          "1000Base-T");
+        lldp_dot3_autoneg_advertised_json(&advertised_json, autoneg_advertised,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_PAUSE,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_PAUSE,
+                                          "FDX_PAUSE");
+        lldp_dot3_autoneg_advertised_json(&advertised_json, autoneg_advertised,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_APAUSE,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_APAUSE,
+                                          "FDX_APAUSE");
+        lldp_dot3_autoneg_advertised_json(&advertised_json, autoneg_advertised,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_SPAUSE,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_SPAUSE,
+                                          "FDX_SPAUSE");
+        lldp_dot3_autoneg_advertised_json(&advertised_json, autoneg_advertised,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_BPAUSE,
+                                          LLDP_DOT3_LINK_AUTONEG_FDX_BPAUSE,
+                                          "FDX_BPAUSE");
+        json_object_put(auto_nego_json, "current",
+                        json_integer_create(mautype));
+
+        json_object_put(port_json, "auto-negotiation", auto_nego_json);
+    }
+
+    if (port->p_power.devicetype) {
+        struct json *power_json = json_object_create();
+
+        json_object_put(power_json, "supported",
+                        json_boolean_create(port->p_power.supported));
+        json_object_put(power_json, "enabled",
+                        json_boolean_create(port->p_power.enabled));
+        json_object_put(power_json, "paircontrol",
+                        json_boolean_create(port->p_power.paircontrol));
+        json_object_put(port_json, "power", power_json);
+    }
+}
+
+static void
 lldp_print_neighbor(struct ds *ds, struct lldp *lldp) OVS_REQUIRES(mutex)
 {
     const char *none_str = "<None>";
@@ -557,6 +863,9 @@ lldp_print_neighbor(struct ds *ds, struct lldp *lldp) OVS_REQUIRES(mutex)
                 ds_put_format(ds, "  %-20s%d\n",
                               "MgmtIface:", mgmt->m_iface);
             }
+
+            lldp_print_neighbor_port_dot3(ds, port);
+            lldp_print_neighbor_port_dot1(ds, port);
         }
     }
 }
@@ -816,6 +1125,9 @@ lldp_print_neighbor_json(struct json *neighbor_json, struct lldp *lldp)
             json_object_put(chassis_sys_json, "mgmt-ip", chassis_mgmt_ip_json);
             json_object_put(chassis_sys_json, "mgmt-iface",
                             chassis_mgmt_iface_json);
+
+            lldp_print_neighbor_port_dot1_json(neighbor_item_json, port);
+            lldp_print_neighbor_port_dot3_json(port_json, port);
 
             json_object_put(neighbor_item_json, "chassis", chassis_json);
             json_object_put(neighbor_item_json, "port", port_json);

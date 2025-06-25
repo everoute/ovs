@@ -113,6 +113,37 @@ lldpd_aa_maps_cleanup(struct lldpd_port *port)
     }
 }
 
+static void
+lldpd_dot13_lists_cleanup(struct lldpd_port *port)
+{
+    struct lldpd_ppvid *ppvid;
+    struct lldpd_vlan *vlan;
+    struct lldpd_pi *pid;
+    if (!ovs_list_is_empty(&port->p_vlans)) {
+        LIST_FOR_EACH_SAFE (vlan, v_entries, &port->p_vlans) {
+            ovs_list_remove(&vlan->v_entries);
+            free(vlan->v_name);
+            free(vlan);
+        }
+        ovs_list_init(&port->p_vlans);
+    }
+    if (!ovs_list_is_empty(&port->p_ppvids)) {
+        LIST_FOR_EACH_SAFE (ppvid, p_entries, &port->p_ppvids) {
+            ovs_list_remove(&ppvid->p_entries);
+            free(ppvid);
+        }
+        ovs_list_init(&port->p_ppvids);
+    }
+    if (!ovs_list_is_empty(&port->p_pids)) {
+        LIST_FOR_EACH_SAFE (pid, p_entries, &port->p_pids) {
+            ovs_list_remove(&pid->p_entries);
+            free(pid->p_pi);
+            free(pid);
+        }
+        ovs_list_init(&port->p_pids);
+    }
+}
+
 /* If `all' is true, clear all information, including information that
    are not refreshed periodically. Port should be freed manually. */
 void
@@ -126,6 +157,8 @@ lldpd_port_cleanup(struct lldpd_port *port, bool all)
 
     /* Cleanup auto-attach mappings */
     lldpd_aa_maps_cleanup(port);
+
+    lldpd_dot13_lists_cleanup(port);
 
     if (all) {
         free(port->p_lastframe);

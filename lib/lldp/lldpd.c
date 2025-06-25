@@ -90,6 +90,11 @@ lldpd_alloc_hardware(struct lldpd *cfg, const char *name, int index)
     hw->h_lport.p_chassis = CONTAINER_OF(ovs_list_front(&cfg->g_chassis),
                                          struct lldpd_chassis, list);
     hw->h_lport.p_chassis->c_refcount++;
+    ovs_list_init(&hw->h_lport.p_vlans);
+    ovs_list_init(&hw->h_lport.p_ppvids);
+    ovs_list_init(&hw->h_lport.p_pids);
+    ovs_list_init(&hw->h_lport.p_isid_vlan_maps);
+
     ovs_list_init(&hw->h_rports);
 
     return hw;

@@ -18,6 +18,8 @@
  */
 
 #include <config.h>
+#include "lldp-const.h"
+#include "lldp-tlv.h"
 #include "lldpd.h"
 #include <errno.h>
 #include <time.h>
@@ -373,6 +375,12 @@ lldp_decode(struct lldpd *cfg OVS_UNUSED, char *frame, int s,
     void *b;
     struct lldpd_aa_isid_vlan_maps_tlv *isid_vlan_map = NULL;
     u_int8_t msg_auth_digest[LLDP_TLV_AA_ISID_VLAN_DIGEST_LENGTH];
+
+    struct lldpd_vlan *vlan = NULL;
+    struct lldpd_pi *pi = NULL;
+    struct lldpd_ppvid *ppvid;
+    int vlan_len;
+
     struct lldpd_mgmt *mgmt;
     u_int8_t addr_str_length, addr_str_buffer[32];
     u_int8_t addr_family, addr_length, *addr_ptr, iface_subtype;
@@ -385,6 +393,9 @@ lldp_decode(struct lldpd *cfg OVS_UNUSED, char *frame, int s,
 
     port = xzalloc(sizeof *port);
     ovs_list_init(&port->p_isid_vlan_maps);
+    ovs_list_init(&port->p_vlans);
+    ovs_list_init(&port->p_ppvids);
+    ovs_list_init(&port->p_pids);
 
     length = s;
     pos = (u_int8_t*) frame;
@@ -569,9 +580,163 @@ lldp_decode(struct lldpd *cfg OVS_UNUSED, char *frame, int s,
             PEEK_BYTES(orgid, sizeof orgid);
             tlv_subtype = PEEK_UINT8;
             if (memcmp(dot1, orgid, sizeof orgid) == 0) {
-                hardware->h_rx_unrecognized_cnt++;
+                switch (tlv_subtype) {
+                case LLDP_TLV_DOT1_VLANNAME:
+                    CHECK_TLV_SIZE(7, "VLAN");
+                    vlan = xzalloc(sizeof *vlan);
+                    vlan->v_vid = PEEK_UINT16;
+                    vlan_len = PEEK_UINT8;
+                    CHECK_TLV_SIZE(7 + vlan_len, "VLAN");
+                    vlan->v_name = xzalloc(vlan_len + 1);
+                    PEEK_BYTES(vlan->v_name, vlan_len);
+                    ovs_list_push_back(&port->p_vlans, &vlan->v_entries);
+                    vlan = NULL;
+                    break;
+
+                case LLDP_TLV_DOT1_PVID:
+                    CHECK_TLV_SIZE(6, "PVID");
+                    port->p_pvid = PEEK_UINT16;
+                    break;
+
+                case LLDP_TLV_DOT1_PPVID:
+                    CHECK_TLV_SIZE(7, "PPVID");
+                    /* Validation needed. */
+                    /* PPVID has to be unique if more than
+                       one PPVID TLVs are received  -
+                       discard if duplicate. */
+                    /* If support bit is not set and
+                       enabled bit is set - PPVID TLV is
+                       considered error and discarded. */
+                    ppvid = xzalloc(sizeof *ppvid);
+                    ppvid->p_cap_status = PEEK_UINT8;
+                    ppvid->p_ppvid = PEEK_UINT16;
+                    if (ppvid->p_ppvid > 4096) {
+                        VLOG_WARN("PPVID value %d invalid on %s",
+                                  ppvid->p_ppvid, hardware->h_ifname);
+                        free(ppvid);
+                    } else {
+                        ovs_list_push_back(&port->p_ppvids, &ppvid->p_entries);
+                    }
+                    break;
+
+                case LLDP_TLV_DOT1_PI:
+                    /* Validation needed. */
+                    /* PI has to be unique if more than
+                       one PI TLVs are received  - discard
+                       if duplicate ?? */
+                    pi = xzalloc(sizeof *pi);
+                    pi->p_pi_len = PEEK_UINT8;
+                    CHECK_TLV_SIZE(5 + pi->p_pi_len, "PI");
+                    pi->p_pi = xzalloc(pi->p_pi_len);
+                    PEEK_BYTES(pi->p_pi, pi->p_pi_len);
+                    ovs_list_push_back(&port->p_pids, &pi->p_entries);
+                    pi = NULL;
+                    break;
+
+                default:
+                    VLOG_INFO("unknown org tlv [%02x:%02x:%02x] received "
+                              "on %s",
+                              orgid[0], orgid[1], orgid[2],
+                              hardware->h_ifname);
+                    hardware->h_rx_unrecognized_cnt++;
+                }
             } else if (memcmp(dot3, orgid, sizeof orgid) == 0) {
-                hardware->h_rx_unrecognized_cnt++;
+                switch (tlv_subtype) {
+                case LLDP_TLV_DOT3_MAC:
+                    CHECK_TLV_SIZE(9, "MAC/PHY");
+                    port->p_macphy.autoneg_support = PEEK_UINT8;
+                    port->p_macphy.autoneg_enabled =
+                        (port->p_macphy.autoneg_support & 0x2) >> 1;
+                    port->p_macphy.autoneg_support =
+                        port->p_macphy.autoneg_support & 0x1;
+                    port->p_macphy.autoneg_advertised = PEEK_UINT16;
+                    port->p_macphy.mau_type = PEEK_UINT16;
+                    break;
+
+                case LLDP_TLV_DOT3_LA:
+                    CHECK_TLV_SIZE(9, "Link aggregation");
+                    PEEK_DISCARD_UINT8;
+                    port->p_aggregid = PEEK_UINT32;
+                    break;
+
+                case LLDP_TLV_DOT3_MFS:
+                    CHECK_TLV_SIZE(6, "MFS");
+                    port->p_mfs = PEEK_UINT16;
+                    break;
+
+                case LLDP_TLV_DOT3_POWER:
+                    CHECK_TLV_SIZE(7, "Power");
+                    port->p_power.devicetype = PEEK_UINT8;
+                    port->p_power.supported =
+                        (port->p_power.devicetype & 0x2) >> 1;
+                    port->p_power.enabled = (port->p_power.devicetype & 0x4) >>
+                                            2;
+                    port->p_power.paircontrol =
+                        (port->p_power.devicetype & 0x8) >> 3;
+                    port->p_power.devicetype = (port->p_power.devicetype & 0x1)
+                                                   ? LLDP_DOT3_POWER_PSE
+                                                   : LLDP_DOT3_POWER_PD;
+                    port->p_power.pairs = PEEK_UINT8;
+                    port->p_power.class = PEEK_UINT8;
+                    /* 802.3at? */
+                    if (tlv_size >= 12) {
+                        port->p_power.powertype = PEEK_UINT8;
+                        port->p_power.source =
+                            (port->p_power.powertype & (1 << 5 | 1 << 4)) >> 4;
+                        port->p_power.priority =
+                            (port->p_power.powertype & (1 << 1 | 1 << 0));
+                        port->p_power.powertype =
+                            (port->p_power.powertype & (1 << 7))
+                                ? LLDP_DOT3_POWER_8023AT_TYPE1
+                                : LLDP_DOT3_POWER_8023AT_TYPE2;
+                        port->p_power.requested = PEEK_UINT16;
+                        port->p_power.allocated = PEEK_UINT16;
+                    } else {
+                        port->p_power.powertype = LLDP_DOT3_POWER_8023AT_OFF;
+                    }
+                    /* 802.3bt? */
+                    if (tlv_size >= 29) {
+                        port->p_power.requested_a = PEEK_UINT16;
+                        port->p_power.requested_b = PEEK_UINT16;
+                        port->p_power.allocated_a = PEEK_UINT16;
+                        port->p_power.allocated_b = PEEK_UINT16;
+                        port->p_power.pse_status = PEEK_UINT16;
+                        port->p_power.pd_status =
+                            (port->p_power.pse_status & (1 << 13 | 1 << 12)) >>
+                            12;
+                        port->p_power.pse_pairs_ext =
+                            (port->p_power.pse_status & (1 << 11 | 1 << 10)) >>
+                            10;
+                        port->p_power.class_a = (port->p_power.pse_status &
+                                                 (1 << 9 | 1 << 8 | 1 << 7)) >>
+                                                7;
+                        port->p_power.class_b = (port->p_power.pse_status &
+                                                 (1 << 6 | 1 << 5 | 1 << 4)) >>
+                                                4;
+                        port->p_power.class_ext =
+                            (port->p_power.pse_status & 0xf);
+                        port->p_power.pse_status =
+                            (port->p_power.pse_status & (1 << 15 | 1 << 14)) >>
+                            14;
+                        port->p_power.type_ext = PEEK_UINT8;
+                        port->p_power.pd_load = (port->p_power.type_ext & 0x1);
+                        port->p_power.type_ext =
+                            ((port->p_power.type_ext &
+                              (1 << 3 | 1 << 2 | 1 << 1)) +
+                             1);
+                        port->p_power.pse_max = PEEK_UINT16;
+                    } else {
+                        port->p_power.type_ext = LLDP_DOT3_POWER_8023BT_OFF;
+                    }
+                    break;
+
+                default:
+                    VLOG_INFO("unknown org tlv [%02x:%02x:%02x] received "
+                              "on %s",
+                              orgid[0], orgid[1], orgid[2],
+                              hardware->h_ifname);
+                    hardware->h_rx_unrecognized_cnt++;
+                }
             } else if (memcmp(med, orgid, sizeof orgid) == 0) {
                 /* LLDP-MED */
                 hardware->h_rx_unrecognized_cnt++;

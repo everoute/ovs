@@ -11,6 +11,8 @@ Post-v3.6.0
        to modify the database data through this transaction.
    - ovs-vsctl:
      * Added 'lldp/neighbor' command that displays lldp neighbor information.
+   - lldp:
+     * Added support for decoding dot1 and dot3 TLVs.
 
 
 v3.6.0 - 18 Aug 2025

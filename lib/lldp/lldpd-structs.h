@@ -45,6 +45,63 @@ lldpd_af(int af)
     }
 }
 
+struct lldpd_ppvid {
+    struct ovs_list p_entries;
+    u_int8_t        p_cap_status;
+    u_int16_t       p_ppvid;
+};
+
+struct lldpd_vlan {
+    struct ovs_list v_entries;
+    char            *v_name;
+    u_int16_t       v_vid;
+};
+
+struct lldpd_pi {
+    struct ovs_list p_entries;
+    char            *p_pi;
+    u_int32_t       p_pi_len;
+};
+
+struct lldpd_dot3_macphy {
+    u_int8_t  autoneg_support;
+    u_int8_t  autoneg_enabled;
+    u_int16_t autoneg_advertised;
+    u_int16_t mau_type;
+};
+
+struct lldpd_dot3_power {
+    u_int8_t devicetype;
+    u_int8_t supported;
+    u_int8_t enabled;
+    u_int8_t paircontrol;
+    u_int8_t pairs;
+    u_int8_t class;
+    u_int8_t powertype; /* If set to LLDP_DOT3_POWER_8023AT_OFF,
+                         * following fields have no meaning. */
+    u_int8_t  source;
+    u_int8_t  priority;
+    u_int16_t requested;
+    u_int16_t allocated;
+
+    /* For 802.3BT */
+    u_int8_t  pd_4pid;
+    u_int16_t requested_a;
+    u_int16_t requested_b;
+    u_int16_t allocated_a;
+    u_int16_t allocated_b;
+    u_int16_t pse_status;
+    u_int8_t  pd_status;
+    u_int8_t  pse_pairs_ext;
+    u_int8_t  class_a;
+    u_int8_t  class_b;
+    u_int8_t  class_ext;
+    u_int8_t  type_ext;
+    u_int8_t  pd_load;
+    u_int16_t pse_max;
+};
+
+
 #define LLDPD_MGMT_MAXADDRSIZE 16 /* sizeof(struct in6_addr) */
 struct lldpd_mgmt {
     struct ovs_list m_entries;
@@ -98,6 +155,18 @@ struct lldpd_port {
     char                 *p_descr;
     u_int16_t            p_mfs;
     struct lldpd_aa_element_tlv        p_element;
+
+    /* Dot3 stuff */
+    u_int32_t                p_aggregid;
+    struct lldpd_dot3_macphy p_macphy;
+    struct lldpd_dot3_power  p_power;
+
+    /* Dot1 stuff */
+    u_int16_t       p_pvid;
+    struct ovs_list p_vlans; /* Contains "struct lldpd_vlan"s. */
+    struct ovs_list p_ppvids; /* Contains "struct lldpd_ppvid"s. */
+    struct ovs_list p_pids;    /* Contains "struct lldpd_pi"s. */
+
     struct ovs_list p_isid_vlan_maps; /* Contains "struct lldpd_aa_isid_vlan_maps_tlv"s. */
 };
 
