@@ -21,6 +21,8 @@ Post-v3.5.0
    - ovs-appctl:
      * Added JSON output support to the 'ovs/route/show' command.
      * Added 'lldp/neighbor' command that displays lldp neighbor infomation.
+   - lldp:
+     * Added support for decoding dot1 and dot3 TLVs.
    - SSL/TLS:
      * Support for deprecated TLSv1 and TLSv1.1 protocols on OpenFlow and
        database connections is now removed.
