@@ -15,6 +15,7 @@ Post-v3.5.0
        core file size.
    - ovs-appctl:
      * Added JSON output support to the 'ovs/route/show' command.
+     * Added 'lldp/neighbor' command that displays lldp neighbor infomation.
    - SSL/TLS:
      * Support for deprecated TLSv1 and TLSv1.1 protocols on OpenFlow and
        database connections is now removed.
