@@ -1,0 +1,335 @@
+AT_BANNER([ovs-lldp])
+
+AT_SETUP([lldp - check lldp neighbor display])
+
+OVS_VSWITCHD_START([])
+
+AT_CHECK([
+    ovs-vsctl set bridge br0 \
+    datapath_type=dummy
+], [0])
+
+AT_CHECK([
+    ovs-vsctl add-port br0 p1 -- set Interface p1 type=dummy \
+    lldp:enable=true
+], [0])
+
+AT_CHECK([ovs-appctl netdev-dummy/receive p1 \
+'0180c200000ee878eecf78d588cc020704e878eecf78a80416054769676162697445746865726e6574312f302f3332060200790808746f5f37305f33310a0b424a59442d36372e3233370c1d48334320436f6d7761726520506c6174666f726d20536f6674776172650e0403140114100c0501c0a843ed020000027b00fe060080c2010bb8fe070080c202020000fe100080c203000109564c414e2030303031fe060080c2060000fe090080c2070100000000fe0900120f01036c01001efe0c00120f020101011000000000fe0600120f0428000000'])
+
+AT_CHECK([ovs-appctl lldp/neighbor p1], [0], [dnl
+-------------------------------------------------------------------------------
+LLDP neighbor:
+-------------------------------------------------------------------------------
+Interface: p1
+  Chassis:
+    Chassis ID:	 e8:78:ee:cf:78:a8
+    SysName:	 BJYD-67.237
+    SysDescr:	 H3C Comware Platform Software
+    MgmtIP:	 192.168.67.237
+    MgmtIface:	 635
+    Capability:	 Bridge, on
+    Capability:	 Router, on
+  Port:
+    PortID:	 GigabitEthernet1/0/32
+    PortDescr:	 to_70_31
+    TTL:	 121
+    MFS:	 10240
+    PMD autoneg:  supported: yes, enabled: yes
+      Adv:	 10Base-T, HD: yes, FD: yes
+      Adv:	 100Base-TX, HD: yes, FD: yes
+      Adv:	 1000Base-T, HD: no, FD: yes
+      MAU oper type:	 30
+    MDI Power:	 supported: no, enabled: no, pair control: no
+      Device type:	 PSE
+  VLAN: 	  3000, pvid: no, VLAN 0001
+-------------------------------------------------------------------------------
+])
+
+AT_CHECK([ovs-appctl --format json lldp/neighbor p1 | jq .lldp.interface[\[0\]].p1], [0], [dnl
+[{
+  "chassis": {
+    "BJYD-67.237": {
+      "capability": [
+        {
+          "enabled": true,
+          "type": "Bridge"
+        },
+        {
+          "enabled": true,
+          "type": "Router"
+        }
+      ],
+      "descr": "H3C Comware Platform Software",
+      "id": {
+        "type": "mac",
+        "value": "e8:78:ee:cf:78:a8"
+      },
+      "mgmt-iface": [
+        635
+      ],
+      "mgmt-ip": [
+        "192.168.67.237"
+      ]
+    }
+  },
+  "port": {
+    "auto-negotiation": {
+      "advertised": [
+        {
+          "fd": true,
+          "hd": true,
+          "type": "10Base-T"
+        },
+        {
+          "fd": true,
+          "hd": true,
+          "type": "100Base-TX"
+        },
+        {
+          "fd": true,
+          "hd": false,
+          "type": "1000Base-T"
+        }
+      ],
+      "current": 30,
+      "enabled": true,
+      "supported": true
+    },
+    "desc": "to_70_31",
+    "id": {
+      "type": "ifname",
+      "value": "GigabitEthernet1/0/32"
+    },
+    "mfs": 10240,
+    "power": {
+      "device-type": "PSE",
+      "enabled": false,
+      "paircontrol": false,
+      "supported": false
+    },
+    "ttl": 121
+  },
+  "ppid": {
+    "enabled": false,
+    "supported": false
+  },
+  "vlan": {
+    "pvid": false,
+    "value": "VLAN 0001",
+    "vlan-id": 3000
+  }
+}]
+])
+
+AT_CHECK([ovs-appctl netdev-dummy/receive p1 \
+'0180c200000e38a91c18a11c88cc02070438a91c18a10a0415054769676162697445746865726e6574312f302f3506020079081e4769676162697445746865726e6574312f302f3520496e746572666163650a0e37462d6a696572752d636875616e0c1d48334320436f6d7761726520506c6174666f726d20536f6674776172650e0403140114100c0501c0a843ea020000027b00fe060080c2010001fe070080c202020000fe100080c203000109564c414e2030303031fe060080c2060000fe090080c2070100000000fe0900120f01036c01001efe0c00120f0203010113000000fffe0600120f042800fe0900120f0301000000000000'])
+
+AT_CHECK([ovs-appctl lldp/neighbor p1], [0], [dnl
+-------------------------------------------------------------------------------
+LLDP neighbor:
+-------------------------------------------------------------------------------
+Interface: p1
+  Chassis:
+    Chassis ID:	 e8:78:ee:cf:78:a8
+    SysName:	 BJYD-67.237
+    SysDescr:	 H3C Comware Platform Software
+    MgmtIP:	 192.168.67.237
+    MgmtIface:	 635
+    Capability:	 Bridge, on
+    Capability:	 Router, on
+  Port:
+    PortID:	 GigabitEthernet1/0/32
+    PortDescr:	 to_70_31
+    TTL:	 121
+    MFS:	 10240
+    PMD autoneg:  supported: yes, enabled: yes
+      Adv:	 10Base-T, HD: yes, FD: yes
+      Adv:	 100Base-TX, HD: yes, FD: yes
+      Adv:	 1000Base-T, HD: no, FD: yes
+      MAU oper type:	 30
+    MDI Power:	 supported: no, enabled: no, pair control: no
+      Device type:	 PSE
+  VLAN: 	  3000, pvid: no, VLAN 0001
+-------------------------------------------------------------------------------
+Interface: p1
+  Chassis:
+    Chassis ID:	 38:a9:1c:18:a1:0a
+    SysName:	 7F-jieru-chuan
+    SysDescr:	 H3C Comware Platform Software
+    MgmtIP:	 192.168.67.234
+    MgmtIface:	 635
+    Capability:	 Bridge, on
+    Capability:	 Router, on
+  Port:
+    PortID:	 GigabitEthernet1/0/5
+    PortDescr:	 GigabitEthernet1/0/5 Interface
+    TTL:	 121
+    MFS:	 10240
+    PMD autoneg:  supported: yes, enabled: yes
+      Adv:	 10Base-T, HD: yes, FD: yes
+      Adv:	 100Base-TX, HD: yes, FD: yes
+      Adv:	 1000Base-T, HD: no, FD: yes
+      MAU oper type:	 30
+    MDI Power:	 supported: yes, enabled: no, pair control: no
+      Device type:	 PSE
+  VLAN: 	  1, pvid: yes, VLAN 0001
+-------------------------------------------------------------------------------
+])
+
+AT_CHECK([ovs-appctl --format json lldp/neighbor p1 | jq .lldp.interface ], [0], [dnl
+[[
+  {
+    "p1": {
+      "chassis": {
+        "BJYD-67.237": {
+          "capability": [
+            {
+              "enabled": true,
+              "type": "Bridge"
+            },
+            {
+              "enabled": true,
+              "type": "Router"
+            }
+          ],
+          "descr": "H3C Comware Platform Software",
+          "id": {
+            "type": "mac",
+            "value": "e8:78:ee:cf:78:a8"
+          },
+          "mgmt-iface": [
+            635
+          ],
+          "mgmt-ip": [
+            "192.168.67.237"
+          ]
+        }
+      },
+      "port": {
+        "auto-negotiation": {
+          "advertised": [
+            {
+              "fd": true,
+              "hd": true,
+              "type": "10Base-T"
+            },
+            {
+              "fd": true,
+              "hd": true,
+              "type": "100Base-TX"
+            },
+            {
+              "fd": true,
+              "hd": false,
+              "type": "1000Base-T"
+            }
+          ],
+          "current": 30,
+          "enabled": true,
+          "supported": true
+        },
+        "desc": "to_70_31",
+        "id": {
+          "type": "ifname",
+          "value": "GigabitEthernet1/0/32"
+        },
+        "mfs": 10240,
+        "power": {
+          "device-type": "PSE",
+          "enabled": false,
+          "paircontrol": false,
+          "supported": false
+        },
+        "ttl": 121
+      },
+      "ppid": {
+        "enabled": false,
+        "supported": false
+      },
+      "vlan": {
+        "pvid": false,
+        "value": "VLAN 0001",
+        "vlan-id": 3000
+      }
+    }
+  },
+  {
+    "p1": {
+      "chassis": {
+        "7F-jieru-chuan": {
+          "capability": [
+            {
+              "enabled": true,
+              "type": "Bridge"
+            },
+            {
+              "enabled": true,
+              "type": "Router"
+            }
+          ],
+          "descr": "H3C Comware Platform Software",
+          "id": {
+            "type": "mac",
+            "value": "38:a9:1c:18:a1:0a"
+          },
+          "mgmt-iface": [
+            635
+          ],
+          "mgmt-ip": [
+            "192.168.67.234"
+          ]
+        }
+      },
+      "port": {
+        "auto-negotiation": {
+          "advertised": [
+            {
+              "fd": true,
+              "hd": true,
+              "type": "10Base-T"
+            },
+            {
+              "fd": true,
+              "hd": true,
+              "type": "100Base-TX"
+            },
+            {
+              "fd": true,
+              "hd": false,
+              "type": "1000Base-T"
+            }
+          ],
+          "current": 30,
+          "enabled": true,
+          "supported": true
+        },
+        "desc": "GigabitEthernet1/0/5 Interface",
+        "id": {
+          "type": "ifname",
+          "value": "GigabitEthernet1/0/5"
+        },
+        "mfs": 10240,
+        "power": {
+          "device-type": "PSE",
+          "enabled": false,
+          "paircontrol": false,
+          "supported": true
+        },
+        "ttl": 121
+      },
+      "ppid": {
+        "enabled": false,
+        "supported": false
+      },
+      "vlan": {
+        "pvid": true,
+        "value": "VLAN 0001",
+        "vlan-id": 1
+      }
+    }
+  }
+]]
+])
+
+AT_CLEANUP
