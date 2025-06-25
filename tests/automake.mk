@@ -68,6 +68,7 @@ TESTSUITE_AT = \
 	tests/tunnel.at \
 	tests/tunnel-push-pop.at \
 	tests/tunnel-push-pop-ipv6.at \
+	tests/ovs-lldp.at \
 	tests/ovs-router.at \
 	tests/lockfile.at \
 	tests/reconnect.at \

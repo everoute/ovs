@@ -1,0 +1,397 @@
+AT_BANNER([ovs-lldp])
+
+AT_SETUP([lldp - check lldp neighbor display])
+
+OVS_VSWITCHD_START([])
+
+add_of_ports br0 1
+AT_CHECK([
+    ovs-vsctl set Interface p1 type=dummy lldp:enable=true
+], [0])
+
+AT_CHECK([ovs-appctl netdev-dummy/receive p1 `python3 -c '
+from scapy.all import *
+from scapy.contrib.lldp import *
+import socket
+packet = Ether(src="aa:aa:aa:aa:aa:aa", dst=LLDP_NEAREST_BRIDGE_MAC)/\
+        LLDPDUChassisID(subtype=LLDPDUChassisID.SUBTYPE_MAC_ADDRESS, id=b"\x06\x05\x04\x03\x02\x01") /\
+        LLDPDUPortID(subtype=LLDPDUPortID.SUBTYPE_INTERFACE_NAME, id="GigabitEthernet1/0/1")/\
+        LLDPDUTimeToLive(ttl=121)/\
+        LLDPDUPortDescription(description="FakePortDesc")/\
+        LLDPDUSystemName(system_name="FakeSystemName")/\
+        LLDPDUSystemDescription(description="FakeSystemDesc")/\
+        LLDPDUSystemCapabilities(
+            other_available=1,
+            repeater_available=1,
+            mac_bridge_available=1,
+            wlan_access_point_available=1,
+            router_available=1,
+            telephone_available=1,
+            docsis_cable_device_available=1,
+            station_only_available=1,
+            mac_bridge_enabled=1,
+            router_enabled=1
+            )/\
+        LLDPDUManagementAddress(
+            management_address_subtype=LLDPDUManagementAddress.SUBTYPE_MANAGEMENT_ADDRESS_IPV4,
+            management_address=socket.inet_aton("1.2.3.4"),
+            interface_numbering_subtype=LLDPDUManagementAddress.SUBTYPE_INTERFACE_NUMBER_IF_INDEX,
+            interface_number=23) /\
+        LLDPDUPowerViaMDI(MDI_power_support="PSE MDI power supported") /\
+        LLDPDUGenericOrganisationSpecific(
+            org_code=LLDPDUGenericOrganisationSpecific.ORG_UNIQUE_CODE_IEEE_802_3,
+            subtype=4,
+            data=int(10240).to_bytes(2,"big")) /\
+        LLDPDUGenericOrganisationSpecific(
+            org_code=LLDPDUGenericOrganisationSpecific.ORG_UNIQUE_CODE_IEEE_802_3,
+            subtype=1,
+            data=b"\x03\x6c\x01\x00\x1e") /\
+        LLDPDUGenericOrganisationSpecific(
+            org_code=LLDPDUGenericOrganisationSpecific.ORG_UNIQUE_CODE_IEEE_802_1,
+            subtype=1,
+            data=int(1).to_bytes(2,"big")) /\
+        LLDPDUGenericOrganisationSpecific(
+            org_code=LLDPDUGenericOrganisationSpecific.ORG_UNIQUE_CODE_IEEE_802_1,
+            subtype=2,
+            data=b"\x02\x00\x00") /\
+        LLDPDUGenericOrganisationSpecific(
+            org_code=LLDPDUGenericOrganisationSpecific.ORG_UNIQUE_CODE_IEEE_802_1,
+            subtype=3,
+            data=b"\x00\x01\x05\x56\x4c\x41\x4e\x31") /\
+        LLDPDUGenericOrganisationSpecific(
+            org_code=LLDPDUGenericOrganisationSpecific.ORG_UNIQUE_CODE_IEEE_802_1,
+            subtype=3,
+            data=b"\x00\x02\x05\x56\x4c\x41\x4e\x32") /\
+        LLDPDUEndOfLLDPDU()
+linehexdump(packet,onlyhex=True)' | tr -d ' '`])
+
+
+AT_CHECK([ovs-appctl lldp/neighbor p1], [0], [dnl
+[LLDP neighbor:
+Interface: p1
+  ChassisID[mac]:     06:05:04:03:02:01
+  PortID[ifname]:     GigabitEthernet1/0/1
+  TTL:                121
+  PortDescr:          FakePortDesc
+  SysName:            FakeSystemName
+  SysDescr:           FakeSystemDesc
+  Capability:         Bridge, on
+  Capability:         Router, on
+  Capability:         Wlan, off
+  Capability:         Station, off
+  Capability:         Repeater, off
+  Capability:         Telephone, off
+  Capability:         Docsis, off
+  Capability:         Other, off
+  MgmtIP:             1.2.3.4
+  MgmtIface:          23
+  MFS:                10240
+  PMD autoneg: supported: yes, enabled: yes
+    Adv:              10Base-T, HD: yes, FD: yes
+    Adv:              100Base-TX, HD: yes, FD: yes
+    Adv:              1000Base-T, HD: no, FD: yes
+    MAU oper type:    30
+  MDI Power: supported: yes, enabled: no, pair control: no
+  VLAN:               1, pvid: yes, VLAN1
+  VLAN:               2, pvid: no, VLAN2
+  PPVID:              0, supported: yes,enabled no]
+])
+
+AT_CHECK([ovs-appctl --format json --pretty lldp/neighbor p1 ], [0], [dnl
+[{
+  "lldp": {
+    "interface": [
+      {
+        "p1": {
+          "chassis": {
+            "FakeSystemName": {
+              "capability": [
+                {
+                  "enabled": true,
+                  "type": "Bridge"},
+                {
+                  "enabled": true,
+                  "type": "Router"},
+                {
+                  "enabled": false,
+                  "type": "Wlan"},
+                {
+                  "enabled": false,
+                  "type": "Station"},
+                {
+                  "enabled": false,
+                  "type": "Repeater"},
+                {
+                  "enabled": false,
+                  "type": "Telephone"},
+                {
+                  "enabled": false,
+                  "type": "Docsis"},
+                {
+                  "enabled": false,
+                  "type": "Other"}],
+              "descr": "FakeSystemDesc",
+              "id": {
+                "type": "mac",
+                "value": "06:05:04:03:02:01"},
+              "mgmt-iface": [
+                23],
+              "mgmt-ip": [
+                "1.2.3.4"]}},
+          "port": {
+            "auto-negotiation": {
+              "current": 30,
+              "enabled": true,
+              "supported": true},
+            "desc": "FakePortDesc",
+            "id": {
+              "type": "ifname",
+              "value": "GigabitEthernet1/0/1"},
+            "mfs": 10240,
+            "power": {
+              "enabled": false,
+              "paircontrol": false,
+              "supported": true},
+            "ttl": 121},
+          "ppvid": [
+            {
+              "enabled": false,
+              "supported": true}],
+          "vlan": [
+            {
+              "pvid": true,
+              "value": "VLAN1",
+              "vlan-id": 1},
+            {
+              "pvid": false,
+              "value": "VLAN2",
+              "vlan-id": 2}]}}]}}]
+])
+
+AT_CHECK([ovs-appctl netdev-dummy/receive p1 `python3 -c '
+from scapy.all import *
+from scapy.contrib.lldp import *
+packet = Ether(src="ee:ee:ee:ee:ee:ee", dst=LLDP_NEAREST_BRIDGE_MAC)/\
+        LLDPDUChassisID(subtype=LLDPDUChassisID.SUBTYPE_NETWORK_ADDRESS,
+                    family="IPv4", id=b"5.6.7.8") /\
+        LLDPDUPortID(subtype=LLDPDUPortID.SUBTYPE_INTERFACE_NAME,
+                    id="GigabitEthernet1/0/2")/\
+        LLDPDUTimeToLive(ttl=100)/\
+        LLDPDUPortDescription(description="FakePortDesc1")/\
+        LLDPDUSystemName(system_name="FakeSystemName1")/\
+        LLDPDUSystemDescription(description="FakeSystemDesc1")/\
+        LLDPDUSystemCapabilities(
+            mac_bridge_available=1,
+            router_available=1,
+            mac_bridge_enabled=1
+            )/\
+        LLDPDUManagementAddress(
+            management_address_subtype=LLDPDUManagementAddress.SUBTYPE_MANAGEMENT_ADDRESS_IPV4,
+            management_address=socket.inet_aton("11.22.33.44"),
+            interface_numbering_subtype=LLDPDUManagementAddress.SUBTYPE_INTERFACE_NUMBER_IF_INDEX,
+            interface_number=100) /\
+        LLDPDUManagementAddress(
+            management_address_subtype=LLDPDUManagementAddress.SUBTYPE_MANAGEMENT_ADDRESS_IPV6,
+            management_address=socket.inet_pton(socket.AF_INET6, "fe00::1"),
+            interface_numbering_subtype=LLDPDUManagementAddress.SUBTYPE_INTERFACE_NUMBER_IF_INDEX,
+            interface_number=200) /\
+        LLDPDUPowerViaMDI(MDI_power_support="PSE MDI power supported") /\
+        LLDPDUGenericOrganisationSpecific(
+            org_code=LLDPDUGenericOrganisationSpecific.ORG_UNIQUE_CODE_IEEE_802_3,
+            subtype=4,
+            data=int(10240).to_bytes(2,"big")) /\
+        LLDPDUGenericOrganisationSpecific(
+            org_code=LLDPDUGenericOrganisationSpecific.ORG_UNIQUE_CODE_IEEE_802_3,
+            subtype=1,
+            data=b"\x03\x6c\x01\x00\x1e") /\
+        LLDPDUGenericOrganisationSpecific(
+            org_code=LLDPDUGenericOrganisationSpecific.ORG_UNIQUE_CODE_IEEE_802_1,
+            subtype=1,
+            data=int(1).to_bytes(2,"big")) /\
+        LLDPDUGenericOrganisationSpecific(
+            org_code=LLDPDUGenericOrganisationSpecific.ORG_UNIQUE_CODE_IEEE_802_1,
+            subtype=2,
+            data=b"\x06\x00\x0f") /\
+        LLDPDUGenericOrganisationSpecific(
+            org_code=LLDPDUGenericOrganisationSpecific.ORG_UNIQUE_CODE_IEEE_802_1,
+            subtype=3,
+            data=b"\x00\x02\x05\x56\x4c\x41\x4e\x32") /\
+        LLDPDUEndOfLLDPDU()
+linehexdump(packet,onlyhex=True)' | tr -d ' '`])
+
+AT_CHECK([ovs-appctl lldp/neighbor p1], [0], [dnl
+[LLDP neighbor:
+Interface: p1
+  ChassisID[mac]:     06:05:04:03:02:01
+  PortID[ifname]:     GigabitEthernet1/0/1
+  TTL:                121
+  PortDescr:          FakePortDesc
+  SysName:            FakeSystemName
+  SysDescr:           FakeSystemDesc
+  Capability:         Bridge, on
+  Capability:         Router, on
+  Capability:         Wlan, off
+  Capability:         Station, off
+  Capability:         Repeater, off
+  Capability:         Telephone, off
+  Capability:         Docsis, off
+  Capability:         Other, off
+  MgmtIP:             1.2.3.4
+  MgmtIface:          23
+  MFS:                10240
+  PMD autoneg: supported: yes, enabled: yes
+    Adv:              10Base-T, HD: yes, FD: yes
+    Adv:              100Base-TX, HD: yes, FD: yes
+    Adv:              1000Base-T, HD: no, FD: yes
+    MAU oper type:    30
+  MDI Power: supported: yes, enabled: no, pair control: no
+  VLAN:               1, pvid: yes, VLAN1
+  VLAN:               2, pvid: no, VLAN2
+  PPVID:              0, supported: yes,enabled no
+
+Interface: p1
+  ChassisID[ip]:      5.6.7.8
+  PortID[ifname]:     GigabitEthernet1/0/2
+  TTL:                100
+  PortDescr:          FakePortDesc1
+  SysName:            FakeSystemName1
+  SysDescr:           FakeSystemDesc1
+  Capability:         Bridge, on
+  Capability:         Router, off
+  MgmtIP:             11.22.33.44
+  MgmtIface:          100
+  MgmtIP:             fe00::1
+  MgmtIface:          200
+  MFS:                10240
+  PMD autoneg: supported: yes, enabled: yes
+    Adv:              10Base-T, HD: yes, FD: yes
+    Adv:              100Base-TX, HD: yes, FD: yes
+    Adv:              1000Base-T, HD: no, FD: yes
+    MAU oper type:    30
+  MDI Power: supported: yes, enabled: no, pair control: no
+  VLAN:               2, pvid: no, VLAN2
+  VLAN:               1, pvid: yes
+  PPVID:              15, supported: yes,enabled yes]
+])
+
+AT_CHECK([ovs-appctl --format json --pretty lldp/neighbor p1 ], [0], [dnl
+[{
+  "lldp": {
+    "interface": [
+      {
+        "p1": {
+          "chassis": {
+            "FakeSystemName": {
+              "capability": [
+                {
+                  "enabled": true,
+                  "type": "Bridge"},
+                {
+                  "enabled": true,
+                  "type": "Router"},
+                {
+                  "enabled": false,
+                  "type": "Wlan"},
+                {
+                  "enabled": false,
+                  "type": "Station"},
+                {
+                  "enabled": false,
+                  "type": "Repeater"},
+                {
+                  "enabled": false,
+                  "type": "Telephone"},
+                {
+                  "enabled": false,
+                  "type": "Docsis"},
+                {
+                  "enabled": false,
+                  "type": "Other"}],
+              "descr": "FakeSystemDesc",
+              "id": {
+                "type": "mac",
+                "value": "06:05:04:03:02:01"},
+              "mgmt-iface": [
+                23],
+              "mgmt-ip": [
+                "1.2.3.4"]}},
+          "port": {
+            "auto-negotiation": {
+              "current": 30,
+              "enabled": true,
+              "supported": true},
+            "desc": "FakePortDesc",
+            "id": {
+              "type": "ifname",
+              "value": "GigabitEthernet1/0/1"},
+            "mfs": 10240,
+            "power": {
+              "enabled": false,
+              "paircontrol": false,
+              "supported": true},
+            "ttl": 121},
+          "ppvid": [
+            {
+              "enabled": false,
+              "supported": true}],
+          "vlan": [
+            {
+              "pvid": true,
+              "value": "VLAN1",
+              "vlan-id": 1},
+            {
+              "pvid": false,
+              "value": "VLAN2",
+              "vlan-id": 2}]}},
+      {
+        "p1": {
+          "chassis": {
+            "FakeSystemName1": {
+              "capability": [
+                {
+                  "enabled": true,
+                  "type": "Bridge"},
+                {
+                  "enabled": false,
+                  "type": "Router"}],
+              "descr": "FakeSystemDesc1",
+              "id": {
+                "type": "ip",
+                "value": "5.6.7.8"},
+              "mgmt-iface": [
+                100,
+                200],
+              "mgmt-ip": [
+                "11.22.33.44",
+                "fe00::1"]}},
+          "port": {
+            "auto-negotiation": {
+              "current": 30,
+              "enabled": true,
+              "supported": true},
+            "desc": "FakePortDesc1",
+            "id": {
+              "type": "ifname",
+              "value": "GigabitEthernet1/0/2"},
+            "mfs": 10240,
+            "power": {
+              "enabled": false,
+              "paircontrol": false,
+              "supported": true},
+            "ttl": 100},
+          "ppvid": [
+            {
+              "enabled": true,
+              "ppvid": 15,
+              "supported": true}],
+          "vlan": [
+            {
+              "pvid": false,
+              "value": "VLAN2",
+              "vlan-id": 2},
+            {
+              "pvid": true,
+              "vlan-id": 1}]}}]}}]
+])
+
+AT_CLEANUP
