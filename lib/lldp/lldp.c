@@ -18,6 +18,7 @@
  */
 
 #include <config.h>
+#include "lldp-tlv.h"
 #include "lldpd.h"
 #include <errno.h>
 #include <time.h>
@@ -567,10 +568,81 @@ lldp_decode(struct lldpd *cfg OVS_UNUSED, char *frame, int s,
             CHECK_TLV_SIZE(1 + sizeof orgid, "Organisational");
             PEEK_BYTES(orgid, sizeof orgid);
             tlv_subtype = PEEK_UINT8;
+            uint8_t tlv_org_size;
             if (memcmp(dot1, orgid, sizeof orgid) == 0) {
-                hardware->h_rx_unrecognized_cnt++;
+                switch (tlv_subtype) {
+                case LLDP_TLV_DOT1_PVID:
+                    CHECK_TLV_SIZE(2, "Dot1 Port VLAN ID");
+                    port->p_dot1.pvid = PEEK_UINT16;
+                    port->p_dot1_enable |= (1 << LLDP_TLV_DOT1_PVID);
+                    break;
+                case LLDP_TLV_DOT1_PPVID:
+                    CHECK_TLV_SIZE(2, "Dot1 Port And Protocol VLAN ID");
+                    port->p_dot1.ppvid = PEEK_UINT16;
+                    port->p_dot1_enable |= (1 << LLDP_TLV_DOT1_PPVID);
+                    break;
+                case LLDP_TLV_DOT1_VLANNAME:
+                case LLDP_TLV_DOT1_PI:
+                    if (tlv_subtype == LLDP_TLV_DOT1_VLANNAME) {
+                        CHECK_TLV_SIZE(2, "DOT1 VLAN ID");
+                        port->p_dot1.vlan_id = PEEK_UINT16;
+                        port->p_dot1_enable |= (1 << LLDP_TLV_DOT1_VLANNAME);
+                    }
+                    CHECK_TLV_SIZE(1, "DOT1 VLAN Name/PI Length");
+                    tlv_org_size = PEEK_UINT8;
+                    if (tlv_org_size < 1) {
+                        VLOG_DBG("empty dot1 vlan name/pi tlv received on %s",
+                                 hardware->h_ifname);
+                        goto malformed;
+                    }
+                    CHECK_TLV_SIZE(tlv_org_size, "DOT1 VLAN Name/PI");
+                    b = xzalloc(tlv_org_size + 1);
+                    PEEK_BYTES(b, tlv_org_size);
+                    if (tlv_subtype == LLDP_TLV_DOT1_VLANNAME) {
+                        free(port->p_dot1.vlan_name);
+                        port->p_dot1.vlan_name = b;
+                    } else if (tlv_subtype == LLDP_TLV_DOT1_PI) {
+                        free(port->p_dot1.pi);
+                        port->p_dot1.pi = b;
+                        port->p_dot1_enable |= (1 << LLDP_TLV_DOT1_PI);
+                    }
+                    break;
+                default:
+                    VLOG_INFO("unknown org tlv [%02x:%02x:%02x] received "
+                              "on %s",
+                              orgid[0], orgid[1], orgid[2],
+                              hardware->h_ifname);
+                    hardware->h_rx_unrecognized_cnt++;
+                }
             } else if (memcmp(dot3, orgid, sizeof orgid) == 0) {
-                hardware->h_rx_unrecognized_cnt++;
+                switch (tlv_subtype) {
+                case LLDP_TLV_DOT3_MAC:
+                    CHECK_TLV_SIZE(5, "DOT3 MAC");
+                    port->p_dot3.auto_nego = PEEK_UINT8;
+                    port->p_dot3.pmd_auto_nego = PEEK_UINT16;
+                    port->p_dot3.mau = PEEK_UINT16;
+                    port->p_dot3_enable |= (1 << LLDP_TLV_DOT3_MAC);
+                    break;
+                case LLDP_TLV_DOT3_POWER:
+                    CHECK_TLV_SIZE(3, "DOT3 MDI");
+                    port->p_dot3.mdi = PEEK_UINT8;
+                    port->p_dot3.pse = PEEK_UINT8;
+                    port->p_dot3.power_class = PEEK_UINT8;
+                    port->p_dot3_enable |= (1 << LLDP_TLV_DOT3_POWER);
+                    break;
+                case LLDP_TLV_DOT3_LA: break;
+                case LLDP_TLV_DOT3_MFS:
+                    CHECK_TLV_SIZE(3, "DOT3 MFS");
+                    port->p_dot3.mfs = PEEK_UINT16;
+                    port->p_dot3_enable |= (1 << LLDP_TLV_DOT3_MFS);
+                    break;
+                default:
+                    VLOG_INFO("unknown org tlv [%02x:%02x:%02x] received "
+                              "on %s",
+                              orgid[0], orgid[1], orgid[2],
+                              hardware->h_ifname);
+                    hardware->h_rx_unrecognized_cnt++;
+                }
             } else if (memcmp(med, orgid, sizeof orgid) == 0) {
                 /* LLDP-MED */
                 hardware->h_rx_unrecognized_cnt++;
