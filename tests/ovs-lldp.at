@@ -1,0 +1,227 @@
+AT_BANNER([ovs-lldp])
+
+AT_SETUP([lldp - check lldp neighbor display])
+
+OVS_VSWITCHD_START([])
+
+add_of_ports br0 1
+AT_CHECK([
+    ovs-vsctl set Interface p1 type=dummy lldp:enable=true
+], [0])
+
+AT_CHECK([ovs-appctl netdev-dummy/receive p1 \
+'0180c200000e38a91c18a12688cc020704aaaaaaaaaaaa0416054769676162697445746865726e6574312f302f313506020079081f4769676162697445746865726e6574312f302f313520496e746572666163650a0e46616b6553797374656d4e616d650c0e46616b6553797374656d446573630e0403140114100c0501c0a80001020000027b00fe060080c2010001fe070080c202020000fe100080c203000109564c414e2030303031fe060080c2060000fe090080c2070100000000fe0900120f01036c01001efe0c00120f0203010113000000fffe0600120f042800fe0900120f0301000000000000'])
+
+AT_CHECK([ovs-appctl lldp/neighbor p1], [0], [dnl
+LLDP neighbor:
+Interface: p1
+  Chassis:
+    Chassis ID:         aa:aa:aa:aa:aa:aa
+    SysName:            FakeSystemName
+    SysDescr:           FakeSystemDesc
+    MgmtIP:             192.168.0.1
+    MgmtIface:          635
+    Capability:         Bridge, on
+    Capability:         Router, on
+  Port:
+    PortID:             GigabitEthernet1/0/15
+    PortDescr:          GigabitEthernet1/0/15 Interface
+    TTL:                121
+    MFS:                10240
+    PMD autoneg: supported: yes, enabled: yes
+      Adv:              10Base-T, HD: yes, FD: yes
+      Adv:              100Base-TX, HD: yes, FD: yes
+      Adv:              1000Base-T, HD: no, FD: yes
+      MAU oper type:    30
+    MDI Power: supported: yes, enabled: no, pair control: no
+  VLAN:               1, pvid: yes, VLAN 0001
+  PPVID:              supported: yes,enabled no
+])
+
+AT_CHECK([ovs-appctl --format json --pretty lldp/neighbor p1 ], [0], [dnl
+[{
+  "lldp": {
+    "interface": {
+      "p1": {
+        "chassis": {
+          "FakeSystemName": {
+            "capability": [
+              {
+                "enabled": true,
+                "type": "Bridge"},
+              {
+                "enabled": true,
+                "type": "Router"}],
+            "descr": "FakeSystemDesc",
+            "id": {
+              "type": "mac",
+              "value": "aa:aa:aa:aa:aa:aa"},
+            "mgmt-iface": [
+              635],
+            "mgmt-ip": [
+              "192.168.0.1"]}},
+        "port": {
+          "auto-negotiation": {
+            "current": 30,
+            "enabled": true,
+            "supported": true},
+          "desc": "GigabitEthernet1/0/15 Interface",
+          "id": {
+            "type": "ifname",
+            "value": "GigabitEthernet1/0/15"},
+          "mfs": 10240,
+          "power": {
+            "enabled": false,
+            "paircontrol": false,
+            "supported": true},
+          "ttl": 121},
+        "ppvid": {
+          "enabled": false,
+          "supported": true},
+        "vlan": {
+          "pvid": true,
+          "value": "VLAN 0001",
+          "vlan-id": 1}}}}}]
+])
+
+AT_CHECK([ovs-appctl netdev-dummy/receive p1 \
+'0180c200000e38a91c18a11c88cc020704aaaaaaaaaaaa0415054769676162697445746865726e6574312f302f3506020079081e4769676162697445746865726e6574312f302f3520496e746572666163650a0e46616b6553797374656d4e616d650c0e46616b6553797374656d446573630e0403140114100c0501c0a80001020000027b00fe060080c2010001fe070080c202020000fe100080c203000109564c414e2030303031fe060080c2060000fe090080c2070100000000fe0900120f01036c01001efe0c00120f0203010113000000fffe0600120f042800fe0900120f0301000000000000'])
+
+AT_CHECK([ovs-appctl lldp/neighbor p1], [0], [dnl
+LLDP neighbor:
+Interface: p1
+  Chassis:
+    Chassis ID:         aa:aa:aa:aa:aa:aa
+    SysName:            FakeSystemName
+    SysDescr:           FakeSystemDesc
+    MgmtIP:             192.168.0.1
+    MgmtIface:          635
+    Capability:         Bridge, on
+    Capability:         Router, on
+  Port:
+    PortID:             GigabitEthernet1/0/15
+    PortDescr:          GigabitEthernet1/0/15 Interface
+    TTL:                121
+    MFS:                10240
+    PMD autoneg: supported: yes, enabled: yes
+      Adv:              10Base-T, HD: yes, FD: yes
+      Adv:              100Base-TX, HD: yes, FD: yes
+      Adv:              1000Base-T, HD: no, FD: yes
+      MAU oper type:    30
+    MDI Power: supported: yes, enabled: no, pair control: no
+  VLAN:               1, pvid: yes, VLAN 0001
+  PPVID:              supported: yes,enabled no
+
+Interface: p1
+  Chassis:
+    Chassis ID:         aa:aa:aa:aa:aa:aa
+    SysName:            FakeSystemName
+    SysDescr:           FakeSystemDesc
+    MgmtIP:             192.168.0.1
+    MgmtIface:          635
+    Capability:         Bridge, on
+    Capability:         Router, on
+  Port:
+    PortID:             GigabitEthernet1/0/5
+    PortDescr:          GigabitEthernet1/0/5 Interface
+    TTL:                121
+    MFS:                10240
+    PMD autoneg: supported: yes, enabled: yes
+      Adv:              10Base-T, HD: yes, FD: yes
+      Adv:              100Base-TX, HD: yes, FD: yes
+      Adv:              1000Base-T, HD: no, FD: yes
+      MAU oper type:    30
+    MDI Power: supported: yes, enabled: no, pair control: no
+  VLAN:               1, pvid: yes, VLAN 0001
+  PPVID:              supported: yes,enabled no
+])
+
+AT_CHECK([ovs-appctl --format json --pretty lldp/neighbor p1 ], [0], [dnl
+[{
+  "lldp": {
+    "interface": [
+      {
+        "p1": {
+          "chassis": {
+            "FakeSystemName": {
+              "capability": [
+                {
+                  "enabled": true,
+                  "type": "Bridge"},
+                {
+                  "enabled": true,
+                  "type": "Router"}],
+              "descr": "FakeSystemDesc",
+              "id": {
+                "type": "mac",
+                "value": "aa:aa:aa:aa:aa:aa"},
+              "mgmt-iface": [
+                635],
+              "mgmt-ip": [
+                "192.168.0.1"]}},
+          "port": {
+            "auto-negotiation": {
+              "current": 30,
+              "enabled": true,
+              "supported": true},
+            "desc": "GigabitEthernet1/0/15 Interface",
+            "id": {
+              "type": "ifname",
+              "value": "GigabitEthernet1/0/15"},
+            "mfs": 10240,
+            "power": {
+              "enabled": false,
+              "paircontrol": false,
+              "supported": true},
+            "ttl": 121},
+          "ppvid": {
+            "enabled": false,
+            "supported": true},
+          "vlan": {
+            "pvid": true,
+            "value": "VLAN 0001",
+            "vlan-id": 1}}},
+      {
+        "p1": {
+          "chassis": {
+            "FakeSystemName": {
+              "capability": [
+                {
+                  "enabled": true,
+                  "type": "Bridge"},
+                {
+                  "enabled": true,
+                  "type": "Router"}],
+              "descr": "FakeSystemDesc",
+              "id": {
+                "type": "mac",
+                "value": "aa:aa:aa:aa:aa:aa"},
+              "mgmt-iface": [
+                635],
+              "mgmt-ip": [
+                "192.168.0.1"]}},
+          "port": {
+            "auto-negotiation": {
+              "current": 30,
+              "enabled": true,
+              "supported": true},
+            "desc": "GigabitEthernet1/0/5 Interface",
+            "id": {
+              "type": "ifname",
+              "value": "GigabitEthernet1/0/5"},
+            "mfs": 10240,
+            "power": {
+              "enabled": false,
+              "paircontrol": false,
+              "supported": true},
+            "ttl": 121},
+          "ppvid": {
+            "enabled": false,
+            "supported": true},
+          "vlan": {
+            "pvid": true,
+            "value": "VLAN 0001",
+            "vlan-id": 1}}}]}}]
+])
+
+AT_CLEANUP
