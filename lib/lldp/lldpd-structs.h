@@ -65,7 +65,7 @@ struct lldpd_chassis {
     u_int8_t        c_protocol;   /* Protocol used to get this chassis */
     u_int8_t        c_id_subtype;
     uint8_t         *c_id;        /* Typically an Ethernet address. */
-    int             c_id_len;
+    u_int32_t       c_id_len;
     char            *c_name;
     char            *c_descr;
 
@@ -94,7 +94,7 @@ struct lldpd_port {
      */
     u_int8_t             p_id_subtype;
     char                 *p_id;
-    int                  p_id_len;
+    u_int32_t            p_id_len;
     char                 *p_descr;
     u_int16_t            p_mfs;
     struct lldpd_aa_element_tlv        p_element;
