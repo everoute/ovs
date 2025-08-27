@@ -40,6 +40,7 @@
 #include "nx-match.h"
 #include "odp-util.h"
 #include "odp-execute.h"
+#include "ofproto/ofproto.h"
 #include "ofproto/ofproto-dpif.h"
 #include "ofproto/ofproto-provider.h"
 #include "ofproto-dpif-ipfix.h"
@@ -3607,7 +3608,7 @@ bundle_send_learning_packets(struct ofbundle *bundle)
 static void
 bundle_run(struct ofbundle *bundle)
 {
-    if (bundle->lacp) {
+    if (bundle->lacp && !ofproto_get_lacp_restore_wait()) {
         lacp_run(bundle->lacp, send_pdu_cb);
     }
     if (bundle->bond) {

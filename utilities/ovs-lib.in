@@ -716,6 +716,8 @@ restart () {
 
     # Restore saved flows and inform vswitchd that we are done.
     restore_flows
+    /usr/bin/ovs-appctl lacp/test
+
     flow_restore_complete
     add_managers
 }

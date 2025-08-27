@@ -33,6 +33,7 @@
 #include "unixctl.h"
 #include "openvswitch/vlog.h"
 #include "util.h"
+#include <sys/types.h>
 
 VLOG_DEFINE_THIS_MODULE(lacp);
 
@@ -166,8 +167,139 @@ static bool info_tx_equal(struct lacp_info *, struct lacp_info *)
     OVS_REQUIRES(mutex);
 static bool member_may_enable__(struct member *) OVS_REQUIRES(mutex);
 
+static void
+lacp_lock(void) OVS_ACQUIRES(mutex);
+static void
+lacp_unlock(void) OVS_RELEASES(mutex);
+
 static unixctl_cb_func lacp_unixctl_show;
 static unixctl_cb_func lacp_unixctl_show_stats;
+
+static void
+lacp_test(struct unixctl_conn *conn,
+                  int argc,
+                  const char *argv[],
+                  void *aux OVS_UNUSED) OVS_EXCLUDED(mutex)
+{
+    VLOG_INFO("LACP lacp_test");
+    struct ds ds = DS_EMPTY_INITIALIZER;
+    struct lacp *lacp;
+    ds_put_cstr(&ds, "MOCK OUTPUT");
+    lacp_lock();
+
+    LIST_FOR_EACH (lacp, node, all_lacps) {
+        VLOG_INFO("LACP inject member info");
+        lacp->negotiated = true;
+        lacp->update = true;
+
+        struct member *member;
+        HMAP_FOR_EACH (member, node, &lacp->members) {
+            if (!strcmp(member->name, "ens10np0")) {
+                VLOG_INFO("inject member info for ens10np0");
+                member->port_id = 1;
+                member->port_priority = 65535;
+                member->attached = true;
+                member->carrier_up = true;
+                member->status = LACP_CURRENT;
+
+                timer_set_duration(&member->rx,
+                                   LACP_RX_MULTIPLIER * LACP_FAST_TIME_TX);
+                timer_set_duration(&member->tx,0);
+
+                member->ntt_actor.sys_priority = htons(65534);
+                member->ntt_actor.port_id = htons(1);
+                member->ntt_actor.key = htons(1);
+                member->ntt_actor.port_priority = htons(65535);
+                eth_addr_from_string("10:70:fd:a0:b7:24",
+                                     &member->ntt_actor.sys_id);
+                // member->ntt_actor.sys_id = ETH_ADDR_C(10,70,fd,a0,b7,24);
+                member->ntt_actor.state = LACP_STATE_ACT | LACP_STATE_TIME |
+                                          LACP_STATE_AGG | LACP_STATE_SYNC |
+                                          LACP_STATE_COL | LACP_STATE_DIST;
+
+                member->partner.sys_priority = htons(32768);
+                member->partner.port_id = htons(2);
+                member->partner.key = htons(1);
+                member->partner.port_priority = htons(32768);
+                eth_addr_from_string("38:a9:1c:18:a1:0a",
+                                     &member->partner.sys_id);
+                // member->partner.sys_id = ETH_ADDR_C(38,a9,1c,18,a1,0a);
+                member->partner.state = LACP_STATE_ACT | LACP_STATE_AGG |
+                                        LACP_STATE_SYNC | LACP_STATE_COL |
+                                        LACP_STATE_DIST;
+
+                VLOG_INFO("inject member %s partner port_priority %u",
+                          member->name, ntohs(member->partner.port_priority));
+                VLOG_INFO("inject member %s partner port_id %u", member->name,
+                          ntohs(member->partner.port_id));
+                VLOG_INFO("inject member %s partner key %u", member->name,
+                          ntohs(member->partner.key));
+
+                VLOG_INFO("inject member %s actor port_priority %u",
+                          member->name,
+                          ntohs(member->ntt_actor.port_priority));
+                VLOG_INFO("inject member %s actor port_id %u", member->name,
+                          ntohs(member->ntt_actor.port_id));
+                VLOG_INFO("inject member %s actor key %u", member->name,
+                          ntohs(member->ntt_actor.key));
+            }
+
+            if (!strcmp(member->name, "ens12")) {
+                VLOG_INFO("inject member info for ens12");
+                member->port_id = 2;
+                member->port_priority = 65535;
+                member->attached = true;
+                member->carrier_up = true;
+                member->status = LACP_CURRENT;
+
+                timer_set_duration(&member->rx,
+                                   LACP_RX_MULTIPLIER * LACP_FAST_TIME_TX);
+                timer_set_duration(&member->tx,0);
+
+                member->ntt_actor.sys_priority = htons(65534);
+                member->ntt_actor.port_id = htons(2);
+                member->ntt_actor.key = htons(1);
+                member->ntt_actor.port_priority = htons(65535);
+                eth_addr_from_string("10:70:fd:a0:b7:24",
+                                     &member->ntt_actor.sys_id);
+                // member->ntt_actor.sys_id = ETH_ADDR_C(10,70,fd,a0,b7,24);
+                member->ntt_actor.state = LACP_STATE_ACT | LACP_STATE_TIME |
+                                          LACP_STATE_AGG | LACP_STATE_SYNC |
+                                          LACP_STATE_COL | LACP_STATE_DIST;
+
+                member->partner.sys_priority = htons(32768);
+                member->partner.port_id = htons(1);
+                member->partner.key = htons(1);
+                member->partner.port_priority = htons(32768);
+                eth_addr_from_string("38:a9:1c:18:a1:0a",
+                                     &member->partner.sys_id);
+                // member->partner.sys_id = ETH_ADDR_C(38,a9,1c,18,a1,0a);
+                member->partner.state = LACP_STATE_ACT | LACP_STATE_AGG |
+                                        LACP_STATE_SYNC | LACP_STATE_COL |
+                                        LACP_STATE_DIST;
+
+                VLOG_INFO("inject member %s partner port_priority %u",
+                          member->name, ntohs(member->partner.port_priority));
+                VLOG_INFO("inject member %s partner port_id %u", member->name,
+                          ntohs(member->partner.port_id));
+                VLOG_INFO("inject member %s partner key %u", member->name,
+                          ntohs(member->partner.key));
+
+                VLOG_INFO("inject member %s actor port_priority %u",
+                          member->name,
+                          ntohs(member->ntt_actor.port_priority));
+                VLOG_INFO("inject member %s actor port_id %u", member->name,
+                          ntohs(member->ntt_actor.port_id));
+                VLOG_INFO("inject member %s actor key %u", member->name,
+                          ntohs(member->ntt_actor.key));
+            }
+        }
+    }
+
+    lacp_unlock();
+
+    unixctl_command_reply(conn, ds_cstr(&ds));
+}
 
 /* Populates 'pdu' with a LACP PDU comprised of 'actor' and 'partner'. */
 static void
@@ -229,6 +361,8 @@ lacp_init(void)
                              lacp_unixctl_show, NULL);
     unixctl_command_register("lacp/show-stats", "[port]", 0, 1,
                              lacp_unixctl_show_stats, NULL);
+    unixctl_command_register("lacp/test", "", 0, 0,
+                             lacp_test, NULL);
 }
 
 static void
@@ -377,6 +511,7 @@ lacp_process_packet(struct lacp *lacp, const void *member_,
             goto out;
     }
 
+    VLOG_INFO("lacp received member %s",  member->name);
     /* On some NICs L1 state reporting is slow. In case LACP packets are
      * received while carrier (L1) state is still down, drop the LACP PDU and
      * trigger re-checking of L1 state. */
@@ -485,6 +620,93 @@ lacp_member_register(struct lacp *lacp, void *member_,
             member_set_expired(member);
         }
     }
+
+    // inject negotiated member info
+    /*
+    lacp->negotiated = true;
+    lacp->update = false;
+    if (!strcmp(member->name,"ens10np0")){
+        VLOG_INFO("inject member info for ens10np0");
+        member->port_id = 1;
+        member->port_priority = 65535;
+        member->attached = true;
+        member->carrier_up = true;
+        member->status = LACP_CURRENT;
+
+        timer_set_duration(&member->rx, LACP_RX_MULTIPLIER * LACP_FAST_TIME_TX);
+        timer_set_duration(&member->tx, LACP_RX_MULTIPLIER * LACP_FAST_TIME_TX);
+
+        member->ntt_actor.sys_priority = htons(65534);
+        member->ntt_actor.port_id = htons(1);
+        member->ntt_actor.key = htons(1);
+        member->ntt_actor.port_priority = htons(65535);
+        eth_addr_from_string("10:70:fd:a0:b7:24",&member->ntt_actor.sys_id);
+        //member->ntt_actor.sys_id = ETH_ADDR_C(10,70,fd,a0,b7,24);
+        member->ntt_actor.state = LACP_STATE_ACT | LACP_STATE_TIME |
+                                  LACP_STATE_AGG | LACP_STATE_SYNC |
+                                  LACP_STATE_COL | LACP_STATE_DIST;
+
+        member->partner.sys_priority = htons(32768);
+        member->partner.port_id = htons(2);
+        member->partner.key = htons(1);
+        member->partner.port_priority = htons(32768);
+        eth_addr_from_string("38:a9:1c:18:a1:0a",&member->partner.sys_id);
+        //member->partner.sys_id = ETH_ADDR_C(38,a9,1c,18,a1,0a);
+        member->partner.state = LACP_STATE_ACT | LACP_STATE_AGG |
+                                LACP_STATE_SYNC | LACP_STATE_COL |
+                                LACP_STATE_DIST;
+
+        
+        VLOG_INFO("inject member %s partner port_priority %u",member->name,ntohs(member->partner.port_priority));
+        VLOG_INFO("inject member %s partner port_id %u",member->name,ntohs(member->partner.port_id));
+        VLOG_INFO("inject member %s partner key %u",member->name,ntohs(member->partner.key));
+
+        VLOG_INFO("inject member %s actor port_priority %u",member->name,ntohs(member->ntt_actor.port_priority));
+        VLOG_INFO("inject member %s actor port_id %u",member->name,ntohs(member->ntt_actor.port_id));
+        VLOG_INFO("inject member %s actor key %u",member->name,ntohs(member->ntt_actor.key));
+    }
+
+    if (!strcmp(member->name,"ens12")){
+        VLOG_INFO("inject member info for ens12");
+        member->port_id = 2;
+        member->port_priority = 65535;
+        member->attached = true;
+        member->carrier_up = true;
+        member->status = LACP_CURRENT;
+
+        timer_set_duration(&member->rx, LACP_RX_MULTIPLIER * LACP_FAST_TIME_TX);
+        timer_set_duration(&member->tx, LACP_RX_MULTIPLIER * LACP_FAST_TIME_TX);
+
+        member->ntt_actor.sys_priority = htons(65534);
+        member->ntt_actor.port_id = htons(2);
+        member->ntt_actor.key = htons(1);
+        member->ntt_actor.port_priority = htons(65535);
+        eth_addr_from_string("10:70:fd:a0:b7:24",&member->ntt_actor.sys_id);
+        //member->ntt_actor.sys_id = ETH_ADDR_C(10,70,fd,a0,b7,24);
+        member->ntt_actor.state = LACP_STATE_ACT | LACP_STATE_TIME |
+                                  LACP_STATE_AGG | LACP_STATE_SYNC |
+                                  LACP_STATE_COL | LACP_STATE_DIST;
+
+        member->partner.sys_priority = htons(32768);
+        member->partner.port_id = htons(1);
+        member->partner.key = htons(1);
+        member->partner.port_priority = htons(32768);
+        eth_addr_from_string("38:a9:1c:18:a1:0a",&member->partner.sys_id);
+        //member->partner.sys_id = ETH_ADDR_C(38,a9,1c,18,a1,0a);
+        member->partner.state = LACP_STATE_ACT | LACP_STATE_AGG |
+                                LACP_STATE_SYNC | LACP_STATE_COL |
+                                LACP_STATE_DIST;
+
+        
+        VLOG_INFO("inject member %s partner port_priority %u",member->name,ntohs(member->partner.port_priority));
+        VLOG_INFO("inject member %s partner port_id %u",member->name,ntohs(member->partner.port_id));
+        VLOG_INFO("inject member %s partner key %u",member->name,ntohs(member->partner.key));
+
+        VLOG_INFO("inject member %s actor port_priority %u",member->name,ntohs(member->ntt_actor.port_priority));
+        VLOG_INFO("inject member %s actor port_id %u",member->name,ntohs(member->ntt_actor.port_id));
+        VLOG_INFO("inject member %s actor key %u",member->name,ntohs(member->ntt_actor.key));
+    }
+*/
     lacp_unlock();
 }
 
@@ -523,6 +745,7 @@ lacp_member_carrier_changed(const struct lacp *lacp, const void *member_,
     }
 
     if (member->status == LACP_CURRENT || member->lacp->active) {
+        VLOG_INFO("member_set_expired lacp_member_carrier_changed");
         member_set_expired(member);
     }
 
@@ -599,9 +822,11 @@ lacp_run(struct lacp *lacp, lacp_send_pdu *send_pdu) OVS_EXCLUDED(mutex)
     lacp_lock();
     HMAP_FOR_EACH (member, node, &lacp->members) {
         if (timer_expired(&member->rx)) {
+            VLOG_INFO("member L669 %s",member->name);
             enum member_status old_status = member->status;
 
             if (member->status == LACP_CURRENT) {
+                VLOG_INFO("member_set_expired lacp_run");
                 member_set_expired(member);
                 member->count_link_expired++;
             } else if (member->status == LACP_EXPIRED) {
@@ -615,6 +840,7 @@ lacp_run(struct lacp *lacp, lacp_send_pdu *send_pdu) OVS_EXCLUDED(mutex)
     }
 
     if (lacp->update) {
+        VLOG_INFO("lacp update");
         lacp_update_attached(lacp);
         seq_change(connectivity_seq_get());
     }
@@ -634,6 +860,16 @@ lacp_run(struct lacp *lacp, lacp_send_pdu *send_pdu) OVS_EXCLUDED(mutex)
             struct lacp_pdu pdu;
 
             member->ntt_actor = actor;
+            VLOG_INFO("member %s L701",member->name);
+            
+            VLOG_INFO("member %s partner port_priority %u",member->name,ntohs(member->partner.port_priority));
+            VLOG_INFO("member %s partner port_id %u",member->name,ntohs(member->partner.port_id));
+            VLOG_INFO("member %s partner key %u",member->name,ntohs(member->partner.key));
+
+            VLOG_INFO("member %s actor port_priority %u",member->name,ntohs(member->ntt_actor.port_priority));
+            VLOG_INFO("member %s actor port_id %u",member->name,ntohs(member->ntt_actor.port_id));
+            VLOG_INFO("member %s actor key %u",member->name,ntohs(member->ntt_actor.key));
+
             compose_lacp_pdu(&actor, &member->partner, &pdu);
             send_pdu(member->aux, &pdu, sizeof pdu);
             member->count_tx_pdus++;
@@ -1150,18 +1386,13 @@ lacp_unixctl_show_stats(struct unixctl_conn *conn,
     struct lacp *lacp;
 
     lacp_lock();
-    if (argc > 1) {
-        lacp = lacp_find(argv[1]);
-        if (!lacp) {
-            unixctl_command_reply_error(conn, "no such lacp object");
-            goto out;
-        }
-        lacp_print_stats(&ds, lacp);
-    } else {
-        LIST_FOR_EACH (lacp, node, all_lacps) {
-            lacp_print_stats(&ds, lacp);
-        }
+
+    LIST_FOR_EACH (lacp, node, all_lacps) {
+
+
+
     }
+    
 
     unixctl_command_reply(conn, ds_cstr(&ds));
     ds_destroy(&ds);
