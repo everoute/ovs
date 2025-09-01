@@ -197,6 +197,18 @@ void free_pagealign(void *);
 OVS_RETURNS_NONNULL void *xmalloc_size_align(size_t, size_t) MALLOC_LIKE;
 void free_size_align(void *);
 
+static inline bool
+str_is_null_or_empty(const char *s)
+{
+    return !s || *s == '\0';
+}
+
+static inline int
+nullable_strlen(const char *s)
+{
+    return s ? strlen(s) : 0;
+}
+
 /* The C standards say that neither the 'dst' nor 'src' argument to
  * memcpy() may be null, even if 'n' is zero.  This wrapper tolerates
  * the null case. */

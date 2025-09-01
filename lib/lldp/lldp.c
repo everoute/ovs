@@ -28,6 +28,7 @@
 #include "compiler.h"
 #include "dp-packet.h"
 #include "packets.h"
+#include "util.h"
 
 VLOG_DEFINE_THIS_MODULE(lldp);
 
@@ -191,14 +192,14 @@ lldp_send(struct lldpd *global OVS_UNUSED,
     lldp_tlv_end(p, start);
 
     /* System name */
-    if (chassis->c_name && *chassis->c_name != '\0') {
+    if (!str_is_null_or_empty(chassis->c_name)) {
         lldp_tlv_start(p, LLDP_TLV_SYSTEM_NAME, &start);
         dp_packet_put(p, chassis->c_name, strlen(chassis->c_name));
         lldp_tlv_end(p, start);
     }
 
     /* System description (skip it if empty) */
-    if (chassis->c_descr && *chassis->c_descr != '\0') {
+    if (!str_is_null_or_empty(chassis->c_descr)) {
         lldp_tlv_start(p, LLDP_TLV_SYSTEM_DESCR, &start);
         dp_packet_put(p, chassis->c_descr, strlen(chassis->c_descr));
         lldp_tlv_end(p, start);
@@ -231,7 +232,7 @@ lldp_send(struct lldpd *global OVS_UNUSED,
     }
 
     /* Port description */
-    if (port->p_descr && *port->p_descr != '\0') {
+    if (!str_is_null_or_empty(port->p_descr)) {
         lldp_tlv_start(p, LLDP_TLV_PORT_DESCR, &start);
         dp_packet_put(p, port->p_descr, strlen(port->p_descr));
         lldp_tlv_end(p, start);

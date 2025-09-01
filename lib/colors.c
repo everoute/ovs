@@ -117,7 +117,7 @@ colors_parse_from_env(const struct color_key color_dic[])
          token != NULL;
          token = strsep(&s, ":")) {
         char *name = strsep(&token, "=");
-        for (char *ptr = token; ptr != NULL && *ptr != '\0'; ptr++) {
+        for (char *ptr = token; !str_is_null_or_empty(ptr); ptr++) {
             /* We accept only decimals and ';' for color marker. */
             if (*ptr == ';' || (*ptr >= '0' && *ptr <= '9')) {
                 continue;
