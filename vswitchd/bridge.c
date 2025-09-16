@@ -3348,6 +3348,11 @@ bridge_run(void)
             smap_get_ullong(&cfg->other_config, "log-poll-interval", 500));
     }
 
+    if (cfg && ofproto_get_lacp_restore_wait()) {
+        ofproto_set_lacp_restore_wait(smap_get_bool(&cfg->other_config,
+                                        "lacp-restore-wait", false));
+    }
+
     bridge_run__();
 
     /* Re-configure SSL.  We do this on every trip through the main loop,
