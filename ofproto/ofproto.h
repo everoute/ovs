@@ -382,6 +382,8 @@ int ofproto_set_local_sample(struct ofproto *ofproto,
                              size_t n_options);
 void ofproto_set_flow_restore_wait(bool flow_restore_wait_db);
 bool ofproto_get_flow_restore_wait(void);
+void ofproto_set_lacp_restore_wait(bool lacp_restore_wait_db);
+bool ofproto_get_lacp_restore_wait(void);
 int ofproto_set_stp(struct ofproto *, const struct ofproto_stp_settings *);
 int ofproto_get_stp_status(struct ofproto *, struct ofproto_stp_status *);
 

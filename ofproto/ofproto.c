@@ -326,6 +326,8 @@ static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
 
 /* The default value of true waits for flow restore. */
 static bool flow_restore_wait = true;
+/* The default value of true waits for lacp restore. */
+static bool lacp_restore_wait = true;
 
 /* Must be called to initialize the ofproto library.
  *
@@ -995,6 +997,18 @@ bool
 ofproto_get_flow_restore_wait(void)
 {
     return flow_restore_wait;
+}
+
+void
+ofproto_set_lacp_restore_wait(bool lacp_restore_wait_db)
+{
+    lacp_restore_wait = lacp_restore_wait_db;
+}
+
+bool
+ofproto_get_lacp_restore_wait(void)
+{
+    return lacp_restore_wait;
 }
 
 /* Retrieve datapath capabilities. */

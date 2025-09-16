@@ -25,6 +25,7 @@
 #include "dp-packet.h"
 #include "ovs-atomic.h"
 #include "packets.h"
+#include "openvswitch/ofp-parse.h"
 #include "openvswitch/poll-loop.h"
 #include "seq.h"
 #include "openvswitch/shash.h"
@@ -168,6 +169,7 @@ static bool member_may_enable__(struct member *) OVS_REQUIRES(mutex);
 
 static unixctl_cb_func lacp_unixctl_show;
 static unixctl_cb_func lacp_unixctl_show_stats;
+static unixctl_cb_func lacp_unixctl_set;
 
 /* Populates 'pdu' with a LACP PDU comprised of 'actor' and 'partner'. */
 static void
@@ -229,6 +231,8 @@ lacp_init(void)
                              lacp_unixctl_show, NULL);
     unixctl_command_register("lacp/show-stats", "[port]", 0, 1,
                              lacp_unixctl_show_stats, NULL);
+        unixctl_command_register("lacp/set", "[port]", 3, INT_MAX,
+                             lacp_unixctl_set, NULL);
 }
 
 static void
@@ -940,6 +944,34 @@ lacp_find(const char *name) OVS_REQUIRES(mutex)
     return NULL;
 }
 
+static struct member *
+lacp_member_find(struct lacp *lacp, const char *name) OVS_REQUIRES(mutex)
+{
+    struct member *member;
+
+    HMAP_FOR_EACH_SAFE (member, node, &lacp->members) {
+        if (!strcmp(member->name, name)) {
+            return member;
+        }
+    }
+
+    return NULL;
+}
+
+static struct member *
+lacp_member_find_by_key(struct lacp *lacp, uint16_t key) OVS_REQUIRES(mutex)
+{
+    struct member *member;
+
+    HMAP_FOR_EACH_SAFE (member, node, &lacp->members) {
+        if (member->port_id == key) {
+            return member;
+        }
+    }
+
+    return NULL;
+}
+
 static void
 ds_put_lacp_state(struct ds *ds, uint8_t state)
 {
@@ -1219,5 +1251,245 @@ lacp_get_member_stats(const struct lacp *lacp, const void *member_,
     }
     ovs_mutex_unlock(&mutex);
     return ret;
+}
 
+static void
+lacp_port_set(struct unixctl_conn *conn, struct lacp *lacp, const char *parms)
+    OVS_REQUIRES(mutex)
+{
+    char *value;
+    char *key;
+    char **p = (char **)&parms;
+    while (ofputil_parse_key_value(p, &key, &value)) {
+        lacp->update = false;
+        uint32_t tmp;
+        if (nullable_string_is_equal(key, "status")) {
+            if (strstr(value, "active")) {
+                lacp->active = true;
+            }
+            if (strstr(value, "negotiated")) {
+                lacp->negotiated = true;
+            }
+
+        } else if (nullable_string_is_equal(key, "sys_id")) {
+            if (!eth_addr_from_string(value, &lacp->sys_id)) {
+                unixctl_command_reply_error(conn, "invalid port sys_id");
+                return;
+            }
+        } else if (nullable_string_is_equal(key, "sys_priority")) {
+            if (!str_to_uint(value, 10, &tmp)) {
+                unixctl_command_reply_error(conn, "invalid port sys_prority");
+                return;
+            }
+            lacp->sys_priority = tmp;
+        } else if (nullable_string_is_equal(key, "key")) {
+            if (!str_to_uint(value, 10, &tmp)) {
+                unixctl_command_reply_error(conn, "invalid port key");
+                return;
+            }
+            lacp->key_member = lacp_member_find_by_key(lacp, tmp);
+        }
+    }
+}
+
+static uint8_t
+lacp_state_from_str(const char *s)
+{
+    uint8_t state = 0;
+    if (strstr(s, "activity")) {
+        state |= LACP_STATE_ACT;
+    }
+    if (strstr(s, "timeout")) {
+        state |= LACP_STATE_TIME;
+    }
+    if (strstr(s, "aggregation")) {
+        state |= LACP_STATE_AGG;
+    }
+    if (strstr(s, "synchronized")) {
+        state |= LACP_STATE_SYNC;
+    }
+    if (strstr(s, "collecting")) {
+        state |= LACP_STATE_COL;
+    }
+    if (strstr(s, "distributing")) {
+        state |= LACP_STATE_DIST;
+    }
+    if (strstr(s, "defaulted")) {
+        state |= LACP_STATE_DEF;
+    }
+    if (strstr(s, "expired")) {
+        state |= LACP_STATE_EXP;
+    }
+    return state;
+}
+
+static void
+lacp_member_set(struct unixctl_conn *conn, struct member *member,
+                const char *op, const char *parms) OVS_REQUIRES(mutex)
+{
+    char *value;
+    char *key;
+    char **p = (char **)&parms;
+    if (nullable_string_is_equal(op, "member")) {
+        while (ofputil_parse_key_value(p, &key, &value)) {
+            uint32_t tmp;
+            if (nullable_string_is_equal(key, "port_id")) {
+                if (!str_to_uint(value, 10, &tmp)) {
+                    unixctl_command_reply_error(conn, "invalid member "
+                                                      "port_id");
+                    return;
+                }
+                member->port_id = tmp;
+            } else if (nullable_string_is_equal(key, "port_priority")) {
+                if (!str_to_uint(value, 10, &tmp)) {
+                    unixctl_command_reply_error(conn, "invalid member "
+                                                      "port_priority");
+                    return;
+                }
+                member->port_priority = tmp;
+            } else if (nullable_string_is_equal(key, "status")) {
+                if (strstr(value, "current")) {
+                    member->status = LACP_CURRENT;
+                    member->carrier_up = true;
+                } else if (strstr(value, "expired")) {
+                    member->status = LACP_EXPIRED;
+                } else if (strstr(value, "defaulted")) {
+                    member->status = LACP_DEFAULTED;
+                }
+
+                if (strstr(value, "attached")) {
+                    member->attached = true;
+                }
+            }
+        }
+    } else if (nullable_string_is_equal(op, "actor")) {
+        while (ofputil_parse_key_value(p, &key, &value)) {
+            uint32_t tmp;
+            if (nullable_string_is_equal(key, "sys_id")) {
+                struct eth_addr addr;
+                if (!eth_addr_from_string(value, &addr)) {
+                    unixctl_command_reply_error(conn, "invalid member "
+                                                      "actor sys_id");
+                    return;
+                }
+                member->ntt_actor.sys_id = addr;
+            } else if (nullable_string_is_equal(key, "sys_priority")) {
+                if (!str_to_uint(value, 10, &tmp)) {
+                    unixctl_command_reply_error(conn, "invalid member "
+                                                      "actor sys_priority");
+                    return;
+                }
+                member->ntt_actor.sys_priority = htons(tmp);
+            } else if (nullable_string_is_equal(key, "port_id")) {
+                if (!str_to_uint(value, 10, &tmp)) {
+                    unixctl_command_reply_error(conn, "invalid member "
+                                                      "actor port_id");
+                    return;
+                }
+                member->ntt_actor.port_id = htons(tmp);
+            } else if (nullable_string_is_equal(key, "port_priority")) {
+                if (!str_to_uint(value, 10, &tmp)) {
+                    unixctl_command_reply_error(conn, "invalid member "
+                                                      "actor port_priority");
+                    return;
+                }
+                member->ntt_actor.port_priority = htons(tmp);
+            } else if (nullable_string_is_equal(key, "key")) {
+                if (!str_to_uint(value, 10, &tmp)) {
+                    unixctl_command_reply_error(conn, "invalid member "
+                                                      "actor key");
+                    return;
+                }
+                member->ntt_actor.key = htons(tmp);
+            } else if (nullable_string_is_equal(key, "state")) {
+                member->ntt_actor.state = lacp_state_from_str(value);
+                VLOG_INFO("member->ntt_actor.state (%p)  (%d)",
+                          &(member->ntt_actor.state), member->ntt_actor.state);
+            }
+        }
+    } else if (nullable_string_is_equal(op, "partner")) {
+        while (ofputil_parse_key_value(p, &key, &value)) {
+            uint32_t tmp;
+            if (nullable_string_is_equal(key, "sys_id")) {
+                struct eth_addr addr;
+                if (!eth_addr_from_string(value, &addr)) {
+                    unixctl_command_reply_error(conn, "invalid member "
+                                                      "partner sys_id");
+                    return;
+                }
+                member->partner.sys_id = addr;
+            } else if (nullable_string_is_equal(key, "sys_priority")) {
+                if (!str_to_uint(value, 10, &tmp)) {
+                    unixctl_command_reply_error(conn, "invalid member "
+                                                      "partner sys_priority");
+                    return;
+                }
+                member->partner.sys_priority = htons(tmp);
+            } else if (nullable_string_is_equal(key, "port_id")) {
+                if (!str_to_uint(value, 10, &tmp)) {
+                    unixctl_command_reply_error(conn, "invalid member "
+                                                      "partner port_id");
+                    return;
+                }
+                member->partner.port_id = htons(tmp);
+            } else if (nullable_string_is_equal(key, "port_priority")) {
+                if (!str_to_uint(value, 10, &tmp)) {
+                    unixctl_command_reply_error(conn, "invalid member "
+                                                      "partner port_priority");
+                    return;
+                }
+                member->partner.port_priority = htons(tmp);
+            } else if (nullable_string_is_equal(key, "key")) {
+                if (!str_to_uint(value, 10, &tmp)) {
+                    unixctl_command_reply_error(conn, "invalid member "
+                                                      "partner key");
+                    return;
+                }
+                member->partner.key = htons(tmp);
+            } else if (nullable_string_is_equal(key, "state")) {
+                member->partner.state = lacp_state_from_str(value);
+            }
+        }
+    } else {
+        unixctl_command_reply_error(conn, "invalid member op");
+    }
+    timer_set_duration(&member->tx, LACP_FAST_TIME_TX);
+    timer_set_duration(&member->rx, LACP_FAST_TIME_TX);
+}
+
+static void
+lacp_unixctl_set(struct unixctl_conn *conn, int argc, const char *argv[],
+                 void *aux OVS_UNUSED) OVS_EXCLUDED(mutex)
+{
+    struct member *member;
+    struct lacp *lacp;
+
+    lacp_lock();
+    lacp = lacp_find(argv[1]);
+    if (!lacp) {
+        unixctl_command_reply_error(conn, "lacp port not found");
+        goto out;
+    }
+
+    if (nullable_string_is_equal(argv[2], "port")) {
+        lacp_port_set(conn, lacp, argv[3]);
+    } else if (nullable_string_is_equal(argv[2], "member")) {
+        member = lacp_member_find(lacp, argv[3]);
+        if (!member) {
+            unixctl_command_reply_error(conn, "lacp member not found");
+            goto out;
+        }
+        if (argc < 5) {
+            unixctl_command_reply_error(conn, "invalid member parms");
+            goto out;
+        }
+        lacp_member_set(conn, member, argv[4], argv[5]);
+    } else {
+        unixctl_command_reply_error(conn, "invalid op type");
+        goto out;
+    }
+
+out:
+    unixctl_command_reply(conn, NULL);
+    lacp_unlock();
 }

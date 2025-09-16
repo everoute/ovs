@@ -3415,6 +3415,11 @@ bridge_run(void)
                                         "flow-restore-wait", false));
     }
 
+    if (cfg && ofproto_get_lacp_restore_wait()) {
+        ofproto_set_lacp_restore_wait(smap_get_bool(&cfg->other_config,
+                                        "lacp-restore-wait", false));
+    }
+
     bridge_run__();
 
     /* Re-configure SSL/TLS.  We do this on every trip through the main loop,

@@ -33,6 +33,8 @@ Commands:
                         configuration.
  save-flows             Outputs a shell script on stdout that will restore
                         OpenFlow flows of each Open vSwitch bridge.
+ save-lacp              Outputs a shell script on stdout that will restore
+                        lacp info of each lacp bond port.
 This script is meant as a helper for the Open vSwitch init script commands.
 EOF
 }
@@ -159,6 +161,158 @@ save_flows () {
     echo "rm -rf \"$workdir\""
 }
 
+save_lacp () {
+    if (ovs-appctl --version) > /dev/null 2>&1; then :; else
+        echo "$0: ovs-ofctl not found in $PATH" >&2
+        exit 1
+    fi
+
+    case `ovs-appctl version | sed 1q` in
+        "ovs-vswitchd (Open vSwitch) 1."*.*)
+            return
+            ;;
+    esac
+
+    SP="[[:space:]]*"
+    BOND_NAME_PATTERN="s/^----${SP}([^[:space:]]+)${SP}----.*/\1/"
+    STATUS_PATTERN="s/^status:${SP}(.*)/\1/"
+    SYS_ID_PATTERN="s/^sys_id:${SP}(.*)/\1/"
+    SYS_PRIORITY_PATTERN="s/^sys_priority:${SP}(.*)/\1/"
+    AGGREGATION_KEY_PATTERN="s/^aggregation${SP}key:${SP}(.*)/\1/"
+    LACP_TIME_PATTERN="s/^lacp_time:${SP}(.*)/\1/"
+    MEMBER_PATTERN="s/^(member|slave):${SP}([^:]+):${SP}(.*)/\2/"
+    MEMBER_STATUS_PATTERN="s/^(member|slave):${SP}([^:]+):${SP}(.*)/\3/"
+    PORT_ID_PATTERN="s/^port_id:${SP}(.*)/\1/"
+    PORT_PRIORITY_PATTERN="s/^port_priority:${SP}(.*)/\1/"
+    MAY_ENABLE_PATTERN="s/^may_enable:${SP}(.*)/\1/"
+    ACTOR_SYS_ID_PATTERN="s/^actor${SP}sys_id:${SP}(.*)/\1/"
+    ACTOR_SYS_PRIORITY_PATTERN="s/^actor${SP}sys_priority:${SP}(.*)/\1/"
+    ACTOR_PORT_ID_PATTERN="s/^actor${SP}port_id:${SP}(.*)/\1/"
+    ACTOR_PORT_PRIORITY_PATTERN="s/^actor${SP}port_priority:${SP}(.*)/\1/"
+    ACTOR_KEY_PATTERN="s/^actor${SP}key:${SP}(.*)/\1/"
+    ACTOR_STATE_PATTERN="s/^actor${SP}state:${SP}(.*)/\1/"
+    PARTNER_SYS_ID_PATTERN="s/^partner${SP}sys_id:${SP}(.*)/\1/"
+    PARTNER_SYS_PRIORITY_PATTERN="s/^partner${SP}sys_priority:${SP}(.*)/\1/"
+    PARTNER_PORT_ID_PATTERN="s/^partner${SP}port_id:${SP}(.*)/\1/"
+    PARTNER_PORT_PRIORITY_PATTERN="s/^partner${SP}port_priority:${SP}(.*)/\1/"
+    PARTNER_KEY_PATTERN="s/^partner${SP}key:${SP}(.*)/\1/"
+    PARTNER_STATE_PATTERN="s/^partner${SP}state:${SP}(.*)/\1/"
+    tmpfile=$(mktemp)
+    ovs-appctl lacp/show | while IFS= read -r line; do
+        t=$(echo "$line" | sed -E 's/^[[:space:]]+//')
+        case "$t" in
+            ----*----*)
+                BOND_NAME=$(echo "$t" | sed -E "$BOND_NAME_PATTERN")
+                ;;
+            status:${SP})
+                STATUS=$(echo "$t" | sed -E "$STATUS_PATTERN" | sed 's/ /+/g')
+                ;;
+            sys_id:${SP})
+                SYS_ID=$(echo "$t" | sed -E "$SYS_ID_PATTERN")
+                ;;
+            sys_priority:${SP})
+                SYS_PRIORITY=$(echo "$t" | sed -E "$SYS_PRIORITY_PATTERN")
+                ;;
+            aggregation${SP}key:${SP})
+                AGGREGATION_KEY=$(echo "$t" |
+                    sed -E "$AGGREGATION_KEY_PATTERN")
+                ;;
+            lacp_time:${SP})
+                LACP_TIME=$(echo "$t" | sed -E "$LACP_TIME_PATTERN")
+                cmd="ovs-appctl lacp/set $BOND_NAME port status=$STATUS,"
+                cmd="${cmd}sys_id=$SYS_ID,sys_priority=$SYS_PRIORITY,"
+                cmd="${cmd}key=$AGGREGATION_KEY,lacp_time=$LACP_TIME"
+                echo "$cmd" >> "$tmpfile"
+                ;;
+            member:${SP}|slave:${SP})
+                # Extract member name and status
+                MEMBER_NAME=$(echo "$t" | sed -E "$MEMBER_PATTERN")
+                MEMBER_STATUS=$(echo "$t" |
+                    sed -E "$MEMBER_STATUS_PATTERN" | sed 's/ /+/g')
+                ;;
+            port_id:${SP})
+                PORT_ID=$(echo "$t" | sed -E "$PORT_ID_PATTERN")
+                ;;
+            port_priority:${SP})
+                PORT_PRIORITY=$(echo "$t" | sed -E "$PORT_PRIORITY_PATTERN")
+                ;;
+            may_enable:${SP})
+                MAY_ENABLE=$(echo "$t" | sed -E "$MAY_ENABLE_PATTERN")
+                # Print member information
+                cmd="ovs-appctl lacp/set $BOND_NAME member $MEMBER_NAME member"
+                cmd="${cmd} status=$MEMBER_STATUS,port_id=$PORT_ID,"
+                cmd="${cmd}port_priority=$PORT_PRIORITY,may_enable=$MAY_ENABLE"
+                echo "$cmd" >> "$tmpfile"
+                ;;
+            actor${SP}sys_id:${SP})
+                ACTOR_SYS_ID=$(echo "$t" | sed -E "$ACTOR_SYS_ID_PATTERN")
+                ;;
+            actor${SP}sys_priority:${SP})
+                ACTOR_SYS_PRIORITY=$(echo "$t" |
+                    sed -E "$ACTOR_SYS_PRIORITY_PATTERN")
+                ;;
+            actor${SP}port_id:${SP})
+                ACTOR_PORT_ID=$(echo "$t" | sed -E "$ACTOR_PORT_ID_PATTERN")
+                ;;
+            actor${SP}port_priority:${SP})
+                ACTOR_PORT_PRIORITY=$(echo "$t" |
+                    sed -E "$ACTOR_PORT_PRIORITY_PATTERN")
+                ;;
+            actor${SP}key:${SP})
+                ACTOR_KEY=$(echo "$t" | sed -E "$ACTOR_KEY_PATTERN")
+                ;;
+            actor${SP}state:${SP})
+                ACTOR_STATE=$(echo "$t" |
+                    sed -E "$ACTOR_STATE_PATTERN" | sed 's/ /+/g')
+                # Print actor information
+                cmd="ovs-appctl lacp/set $BOND_NAME member $MEMBER_NAME actor"
+                cmd="${cmd} sys_id=$ACTOR_SYS_ID,"
+                cmd="${cmd}sys_priority=$ACTOR_SYS_PRIORITY,"
+                cmd="${cmd}port_id=$ACTOR_PORT_ID,"
+                cmd="${cmd}port_priority=$ACTOR_PORT_PRIORITY,"
+                cmd="${cmd}key=$ACTOR_KEY,state=$ACTOR_STATE"
+                echo "$cmd" >> "$tmpfile"
+                ;;
+            partner${SP}sys_id:${SP})
+                PARTNER_SYS_ID=$(echo "$t" |
+                    sed -E "$PARTNER_SYS_ID_PATTERN")
+                ;;
+            partner${SP}sys_priority:${SP})
+                PARTNER_SYS_PRIORITY=$(echo "$t" |
+                    sed -E "$PARTNER_SYS_PRIORITY_PATTERN")
+                ;;
+            partner${SP}port_id:${SP})
+                PARTNER_PORT_ID=$(echo "$t" |
+                    sed -E "$PARTNER_PORT_ID_PATTERN")
+                ;;
+            partner${SP}port_priority:${SP})
+                PARTNER_PORT_PRIORITY=$(echo "$t" |
+                    sed -E "$PARTNER_PORT_PRIORITY_PATTERN")
+                ;;
+            partner${SP}key:${SP})
+                PARTNER_KEY=$(echo "$t" | sed -E "$PARTNER_KEY_PATTERN")
+                ;;
+            partner${SP}state:${SP})
+                PARTNER_STATE=$(echo "$t" |
+                    sed -E "$PARTNER_STATE_PATTERN" | sed 's/ /+/g')
+                # Print partner information
+                cmd="ovs-appctl lacp/set $BOND_NAME"
+                cmd="${cmd} member $MEMBER_NAME partner"
+                cmd="${cmd} sys_id=$PARTNER_SYS_ID,"
+                cmd="${cmd}sys_priority=$PARTNER_SYS_PRIORITY,"
+                cmd="${cmd}port_id=$PARTNER_PORT_ID,"
+                cmd="${cmd}port_priority=$PARTNER_PORT_PRIORITY,"
+                cmd="${cmd}key=$PARTNER_KEY,state=$PARTNER_STATE"
+                echo "$cmd" >> "$tmpfile"
+                ;;
+        esac
+    done
+    sed -i '1!G;h;$!d' "$tmpfile"
+    cat "$tmpfile"
+    rm -f "$tmpfile"
+}
+
+
 while [ $# -ne 0 ]
 do
     case $1 in
@@ -170,6 +324,11 @@ do
         "save-interfaces")
             shift
             save_interfaces "$@"
+            exit 0
+            ;;
+        "save-lacp")
+            shift
+            save_lacp "$@"
             exit 0
             ;;
         -h | --help)

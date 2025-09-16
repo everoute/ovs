@@ -41,6 +41,7 @@
 #include "nx-match.h"
 #include "odp-util.h"
 #include "odp-execute.h"
+#include "ofproto/ofproto.h"
 #include "ofproto/ofproto-dpif.h"
 #include "ofproto/ofproto-provider.h"
 #include "ofproto-dpif-ipfix.h"
@@ -3702,7 +3703,6 @@ send_pdu_cb(void *port_, const void *pdu, size_t pdu_size)
     struct ofport_dpif *port = port_;
     struct eth_addr ea;
     int error;
-
     error = netdev_get_etheraddr(port->up.netdev, &ea);
     if (!error) {
         struct dp_packet packet;
@@ -3781,6 +3781,9 @@ bundle_send_learning_packets(struct ofbundle *bundle)
 static void
 bundle_run(struct ofbundle *bundle)
 {
+    if (bundle->lacp && ofproto_get_lacp_restore_wait()) {
+        return;
+    }
     if (bundle->lacp) {
         lacp_run(bundle->lacp, send_pdu_cb);
     }

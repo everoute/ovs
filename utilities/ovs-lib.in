@@ -587,10 +587,19 @@ ovs_save () {
     [ -z "${bridges}" ] && return 0
 }
 
+ovs_save_lacp () {
+    $datadir/scripts/ovs-save save-lacp > "${script_lacp}"
+    chmod +x "${script_lacp}"
+}
+
 save_flows_if_required () {
     if test X"$DELETE_BRIDGES" != Xyes; then
         action "Saving flows" ovs_save save-flows "${script_flows}"
     fi
+}
+
+save_lacp () {
+    action "Saving lacp" ovs_save_lacp
 }
 
 save_interfaces () {
@@ -604,6 +613,12 @@ flow_restore_wait () {
     fi
 }
 
+lacp_restore_wait () {
+    if test X"${OVS_VSWITCHD:-yes}" = Xyes; then
+        ovs_vsctl set open_vswitch . other_config:lacp-restore-wait="true"
+    fi
+}
+
 flow_restore_complete () {
     if test X"${OVS_VSWITCHD:-yes}" = Xyes; then
         ovs_vsctl --if-exists remove open_vswitch . other_config \
@@ -611,9 +626,21 @@ flow_restore_complete () {
     fi
 }
 
+lacp_restore_complete () {
+    if test X"${OVS_VSWITCHD:-yes}" = Xyes; then
+        ovs_vsctl --if-exists remove open_vswitch . other_config \
+                  lacp-restore-wait="true"
+    fi
+}
+
 restore_flows () {
     [ -x "${script_flows}" ] && \
         action "Restoring saved flows" "${script_flows}"
+}
+
+restore_lacp () {
+    [ -x "${script_lacp}" ] && \
+        action "Restoring saved lacp" "${script_lacp}"
 }
 
 restore_interfaces () {
@@ -633,7 +660,8 @@ restore_interfaces () {
 init_restore_scripts () {
     script_interfaces=`mktemp`
     script_flows=`mktemp`
-    trap 'rm -f "${script_interfaces}" "${script_flows}"' 0
+    script_lacp=`mktemp`
+    trap 'rm -f "${script_interfaces}" "${script_flows}" "${script_lacp}"' 0
 }
 
 force_reload_kmod () {
@@ -648,6 +676,7 @@ force_reload_kmod () {
 
     init_restore_scripts
     save_flows_if_required
+    save_lacp
 
     # Restart the database first, since a large database may take a
     # while to load, and we want to minimize forwarding disruption.
@@ -682,11 +711,16 @@ force_reload_kmod () {
 
     # Start vswitchd by asking it to wait till flow restore is finished.
     flow_restore_wait
+    lacp_restore_wait
     start_forwarding || return 1
 
-    # Restore saved flows and inform vswitchd that we are done.
+    # Restore saved resources and inform vswitchd that we are done.
     restore_flows
+    restore_lacp
+
     flow_restore_complete
+    lacp_restore_complete
+
     add_managers
 
     restore_interfaces
@@ -704,6 +738,7 @@ restart () {
         init_restore_scripts
         if test X"${OVS_VSWITCHD:-yes}" = Xyes; then
             save_flows_if_required
+            save_lacp
         fi
     fi
 
@@ -716,10 +751,15 @@ restart () {
 
     # Start vswitchd by asking it to wait till flow restore is finished.
     flow_restore_wait
+    lacp_restore_wait
     start_forwarding || return 1
 
-    # Restore saved flows and inform vswitchd that we are done.
+    # Restore saved resources and inform vswitchd that we are done.
     restore_flows
+    restore_lacp
+
     flow_restore_complete
+    lacp_restore_complete
+
     add_managers
 }
