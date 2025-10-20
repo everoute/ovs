@@ -3343,6 +3343,11 @@ bridge_run(void)
                                         "flow-restore-wait", false));
     }
 
+    if (cfg) {
+        time_set_config_log_poll_interval(
+            smap_get_ullong(&cfg->other_config, "log-poll-interval", 500));
+    }
+
     bridge_run__();
 
     /* Re-configure SSL.  We do this on every trip through the main loop,

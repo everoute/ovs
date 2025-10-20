@@ -89,6 +89,8 @@ static struct clock wall_clock;      /* CLOCK_REALTIME. */
 /* The monotonic time at which the time module was initialized. */
 static long long int boot_time;
 
+static long long int config_log_poll_interval = 500;
+
 /* True only when timeval_dummy_register() is called. */
 static bool timewarp_enabled;
 /* Reference to the seq struct.  Threads other than main thread can
@@ -120,6 +122,12 @@ init_clock(struct clock *c, clockid_t id)
     ovs_mutex_init(&c->mutex);
     atomic_init(&c->slow_path, false);
     xclock_gettime(c->id, &c->cache);
+}
+
+void
+time_set_config_log_poll_interval(long long int config_log_poll_interval_db)
+{
+    config_log_poll_interval = config_log_poll_interval_db;
 }
 
 static void
@@ -642,7 +650,14 @@ log_poll_interval(long long int last_wakeup)
 {
     long long int interval = time_msec() - last_wakeup;
 
-    if (interval >= 1000 && !is_warped(&monotonic_clock)) {
+    if (is_warped(&monotonic_clock)){
+        return;
+    }
+
+    if (interval >= config_log_poll_interval && interval < 1000) {
+        VLOG_WARN("Unreasonably long %lldms poll interval", interval);
+    }
+    if (interval >= 1000) {
         const struct rusage *last_rusage = get_recent_rusage();
         struct rusage rusage;
 

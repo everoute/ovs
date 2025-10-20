@@ -79,6 +79,9 @@ int get_cpu_usage(void);
 
 long long int time_boot_msec(void);
 
+void
+time_set_config_log_poll_interval(long long int config_log_poll_interval_db);
+
 void timewarp_run(void);
 
 void timeval_stop(void);
