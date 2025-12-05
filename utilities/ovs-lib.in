@@ -733,7 +733,7 @@ restart () {
     if daemon_is_running ovsdb-server && daemon_is_running ovs-vswitchd; then
         init_restore_scripts
         if test X"${OVS_VSWITCHD:-yes}" = Xyes; then
-            # save_flows_if_required
+            save_flows_if_required
             save_lacp
         fi
     fi
@@ -751,7 +751,7 @@ restart () {
     start_forwarding || return 1
 
     # Restore saved resources and inform vswitchd that we are done.
-    # restore_flows
+    restore_flows
     restore_lacp
 
     flow_restore_complete
