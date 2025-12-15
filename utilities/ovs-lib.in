@@ -263,7 +263,7 @@ stop_daemon () {
             # stop older versions of daemons which do not behave correctly
             # with `ovs-appctl exit` (e.g. ovs-vswitchd <= 2.5.0 deletes
             # internal ports).
-            if version_geq "$version" "2.5.90"; then
+            if version_geq "$version" "2.13.90"; then
                 actions="$graceful $actions"
             fi
             actiontype=""
