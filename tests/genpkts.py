@@ -25,7 +25,7 @@ if len(sys.argv) > 2:
 else:
     traffic_opt = ""
 
-for i in range(0, size):
+for i in range(0, size): # 0 up to size
     pkt = []
 
     if traffic_opt == "fuzzy":
